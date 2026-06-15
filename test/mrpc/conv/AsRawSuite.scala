@@ -15,6 +15,8 @@ class AsRawSuite extends munit.FunSuite:
 
   test("forFuture lifts an inner asRaw over Future with an explicit ExecutionContext"):
     given scala.concurrent.ExecutionContext = parasitic
-    val instance = summon[AsRaw[Future[Int], Future[Int]]]
+    // Distinct Raw/Real so forFuture (not identity) is selected and the EC is exercised.
+    given AsRaw[String, Int] = (i: Int) => i.toString
+    val instance = summon[AsRaw[Future[String], Future[Int]]]
     val result = Await.result(instance.asRaw(Future.successful(2)), 1.second)
-    assertEquals(result, 2)
+    assertEquals(result, "2")

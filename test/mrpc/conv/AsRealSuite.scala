@@ -15,6 +15,8 @@ class AsRealSuite extends munit.FunSuite:
 
   test("forFuture lifts an inner asReal over Future with an explicit ExecutionContext"):
     given scala.concurrent.ExecutionContext = parasitic
-    val instance = summon[AsReal[Future[Int], Future[Int]]]
-    val result = Await.result(instance.asReal(Future.successful(2)), 1.second)
+    // Distinct Raw/Real so forFuture (not identity) is selected and the EC is exercised.
+    given AsReal[String, Int] = (s: String) => s.toInt
+    val instance = summon[AsReal[Future[String], Future[Int]]]
+    val result = Await.result(instance.asReal(Future.successful("2")), 1.second)
     assertEquals(result, 2)
