@@ -5,6 +5,8 @@ import scala.compiletime.summonInline
 
 import made.annotation.MetaAnnotation
 
+import mrpc.annotation.{rpcMethodMetadata, rpcParamMetadata}
+
 /**
  * Shared runtime annotation-query helpers. The accessors are `inline` so each call site summons the
  * class evidence for the concrete annotation type, making the runtime filter checkable without a cast.
@@ -26,19 +28,32 @@ private object AnnotationQuery:
  */
 final case class RpcMetadata[Real](
   name: String,
-  // @rpcMethodMetadata projection: one entry per RPC method (per-method metadata slot).
-  operations: List[OperationMetadata],
+  // The @rpcMethodMetadata marker declares this slot as the per-method projection: one entry per
+  // RPC method. The annotation is the observable statement of intent (its presence is what the
+  // recognition hook below names); the materializer emits this same operations list.
+  @rpcMethodMetadata operations: List[OperationMetadata],
   annotations: List[Annotation],
 ):
   inline def getAnnotation[A <: MetaAnnotation]: Option[A] = AnnotationQuery.find[A](annotations)
   inline def hasAnnotation[A <: MetaAnnotation]: Boolean = getAnnotation[A].isDefined
 
+/**
+ * The metadata-strategy markers honored by materialization. `operations` is annotated
+ * `@rpcMethodMetadata` (per-method projection) and each op's `params` is annotated `@rpcParamMetadata`
+ * (per-param projection); this hook names both so a consumer can observe they are recognized — not
+ * ignored. The full commons strategy DSL (`@composite`/`@reifyAnnot`/`@infer`/multi-collection) is
+ * deferred to v2 — only this structural split is honored.
+ */
+object RpcMetadata:
+  val recognizedStrategies: Set[String] = Set("rpcMethodMetadata", "rpcParamMetadata")
+
 final case class OperationMetadata(
   name: String, // the RESOLVED rpcName (RpcName.computeAll) — the metadata identity
   label: String, // the raw method label (pre-resolution) — for parity diffing
   arity: String, // "fire" | "call" | "get" — same classification the matcher uses
-  // @rpcParamMetadata projection: one entry per param, declaration order, flattened across lists.
-  params: List[ParamMetadata],
+  // The @rpcParamMetadata marker declares this slot as the per-param projection: one entry per param,
+  // declaration order, flattened across param lists.
+  @rpcParamMetadata params: List[ParamMetadata],
   annotations: List[Annotation],
 ):
   inline def getAnnotation[A <: MetaAnnotation]: Option[A] = AnnotationQuery.find[A](annotations)
