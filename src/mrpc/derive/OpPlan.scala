@@ -32,6 +32,12 @@ private[derive] final case class OpPlan(
   arity: Arity,
   params: List[ParamPlan],
   resultEncoding: Encoding,
+  // The operation's refined `DoneOperation` type and its position in `Done.Operations`. The
+  // materialize macros need both to select the exact operation term off the mirror and call the
+  // type-safe `Done.invoke`. They are macro-only payloads (like `paramType`), absent from the
+  // runtime `OpDescriptor` projection.
+  opType: Type[?],
+  index: Int,
 )
 
 /**

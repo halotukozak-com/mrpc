@@ -19,10 +19,13 @@ trait RawRpcCompanion[Raw]:
   def asReal[Real](raw: Raw)(using a: AsRealRpc[Real]): Real = a.asReal(raw)
   def asRaw[Real](real: Real)(using a: AsRawRpc[Real]): Raw = a.asRaw(real)
 
-  // Derivation entry points — real bodies land in the derivation phase. compiletime.error fires
-  // only if called, so the API type-checks now and premature use is a compile error.
-  inline def materializeAsRaw[Real]: AsRawRpc[Real] =
-    scala.compiletime.error("materializeAsRaw is not implemented yet")
+  // The server adapter: a `Real` trait yields a `RawRpc[Raw]`, so its conversion is
+  // `AsRaw[RawRpc[Raw], Real]` (distinct from the leaf `AsRawRpc[Real] = AsRaw[Raw, Real]` codec).
+  inline def materializeAsRaw[Real]: AsRaw[RawRpc[Raw], Real] =
+    ${ mrpc.derive.AsRawDerivation.impl[Raw, Real] }
+
+  // Remaining derivation entry points — real bodies land later. compiletime.error fires only if
+  // called, so the API type-checks now and premature use is a compile error.
   inline def materializeAsReal[Real]: AsRealRpc[Real] =
     scala.compiletime.error("materializeAsReal is not implemented yet")
   inline def materializeAsRawReal[Real]: AsRawRealRpc[Real] =

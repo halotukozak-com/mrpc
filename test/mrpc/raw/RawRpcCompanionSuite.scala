@@ -22,5 +22,7 @@ class RawRpcCompanionSuite extends munit.FunSuite:
     assertEquals(raw.asRaw(7), "7")
     assertEquals(real.asReal("7"), 7)
 
-  test("materializeAsRaw is a compile-time error when called"):
+  test("materializeAsRaw rejects a non-RPC Real at compile time"):
+    // `Int` has no Done mirror / RPC shape, so deriving a server adapter for it must fail to compile
+    // rather than silently produce a broken instance.
     assert(compileErrors("Ex.materializeAsRaw[Int]").nonEmpty)

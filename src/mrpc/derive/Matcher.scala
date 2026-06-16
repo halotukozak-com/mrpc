@@ -77,7 +77,9 @@ private[derive] object Matcher:
         // Names are resolved across the whole op set so overloads disambiguate and duplicates are
         // detected; the matcher then attaches arity + param plans to each resolved name.
         val resolvedNames = RpcName.computeAll(ops)
-        ops.zip(resolvedNames).map((op, name) => planOne(op, name))
+        ops.zip(resolvedNames).zipWithIndex.map { case ((op, name), index) =>
+          planOne(op, name, index)
+        }
 
   /** Extracts the refined `DoneOperation` element types from the summoned mirror's `Operations`. */
   private def operationTypes[T: Type](doneExpr: Expr[Done.Of[T]])(using Quotes): List[Type[?]] =
@@ -89,7 +91,7 @@ private[derive] object Matcher:
       case _ => report.errorAndAbort("Done.Operations is not a tuple")
 
   /** Classifies a single operation type into an [[OpPlan]] using its already-resolved rpcName. */
-  private def planOne(opType: Type[?], rpcName: String)(using Quotes): OpPlan =
+  private def planOne(opType: Type[?], rpcName: String, index: Int)(using Quotes): OpPlan =
     val label = OpReflect.labelOf(opType)
     val arity = arityOf(OpReflect.outputType(opType))
     val params = OpReflect.inputElems(opType).map(planParam)
@@ -97,7 +99,7 @@ private[derive] object Matcher:
     // it is itself Raw; @verbatim on a non-Raw result has no identity to land on. Result-verbatim is
     // therefore only reachable through the same Raw-type check params use; v1 fixtures encode results.
     val resultEncoding = Encoding.Encoded
-    OpPlan(label, rpcName, arity, params, resultEncoding)
+    OpPlan(label, rpcName, arity, params, resultEncoding, opType, index)
 
   /**
    * Arity from the output type. `Unit` -> fire; `Future[X]` -> call carrying `X`; anything else is
