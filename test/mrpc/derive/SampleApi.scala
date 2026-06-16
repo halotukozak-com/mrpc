@@ -5,6 +5,7 @@ import scala.concurrent.{ExecutionContext, Future}
 import mcodec.MCodec
 
 import mrpc.annotation.{rpcName, RpcTag}
+import mrpc.conv.AsRaw
 import mrpc.raw.RawRpcCompanion
 
 /**
@@ -64,3 +65,12 @@ object SampleApi:
     import mrpc.codec.JsonRawValue.given
 
     given ExecutionContext = ExecutionContext.parasitic
+
+    /**
+     * Sanity references proving the leaf codec givens and the parasitic ExecutionContext resolve in
+     * this companion's scope — the exact placement the derivation macros will rely on. Bound to
+     * members so the import and the given are load-bearing before any macro is invoked.
+     */
+    val userEncoder: AsRawRpc[User] = summon[AsRawRpc[User]]
+    val futureResultEncoder: AsRaw[Future[String], Future[User]] =
+      summon[AsRaw[Future[String], Future[User]]]
