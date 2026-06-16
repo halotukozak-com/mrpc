@@ -23,3 +23,12 @@ object AsRaw:
     ec: ExecutionContext,
   ): AsRaw[Future[Raw], Future[Real]] =
     _.map(inner.asRaw)
+
+  /**
+   * By-name wrapper that defers construction of the underlying conversion until first use. Breaks
+   * self/mutually-referential sub-RPC cycles: the recursive adapter is forced lazily at runtime, not
+   * re-derived during macro expansion. Mirrors mcodec MCodec.makeLazy.
+   */
+  def makeLazy[Raw, Real](conv: => AsRaw[Raw, Real]): AsRaw[Raw, Real] = new AsRaw[Raw, Real]:
+    private lazy val c = conv
+    def asRaw(real: Real): Raw = c.asRaw(real)
