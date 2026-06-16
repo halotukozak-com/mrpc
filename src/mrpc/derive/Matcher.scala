@@ -17,8 +17,12 @@ import made.Done
  * Tag annotations (`@tagged`/`@methodTag`/`@paramTag`) are intentionally NOT read here: with one raw
  * method per arity there is no tag-selection branch to drive. This object is the seam where a future
  * generic-raw-method matcher would plug tag logic in.
+ *
+ * Widened to `private[mrpc]` because it is the shared introspection reused by BOTH the engine
+ * (matching/dispatch) and metadata materialization — one Done-walk path, no fork. The cross-package
+ * metadata suite also asserts the metadata rpcNames EQUAL [[describe]]'s.
  */
-private[derive] object Matcher:
+private[mrpc] object Matcher:
 
   /**
    * Test-facing entry point: classifies every operation of `T` and yields the flattened, runtime
@@ -80,6 +84,28 @@ private[derive] object Matcher:
         ops.zip(resolvedNames).zipWithIndex.map { case ((op, name), index) =>
           planOne(op, name, index)
         }
+
+  /**
+   * Reuse surface for metadata materialization: the refined op types, in Done order. Summons the
+   * `Done.Of[T]` mirror and delegates to the SAME [[operationTypes]] walk the matcher uses — no
+   * second op-type traversal.
+   */
+  private[mrpc] def operationTypesOf[T: Type](using Quotes): List[Type[?]] =
+    import quotes.reflect.*
+    Expr.summon[Done.Of[T]] match
+      case None =>
+        report.errorAndAbort(s"could not summon a Done mirror for ${TypeRepr.of[T].show}")
+      case Some(doneExpr) => operationTypes(doneExpr)
+
+  /**
+   * Reuse surface: the arity TAG (`"fire"`|`"call"`|`"get"`) for an op type — the SAME classification
+   * [[planOne]] applies via [[arityOf]], exposed for the metadata fold so there is no second classifier.
+   */
+  private[mrpc] def arityTagOf(opType: Type[?])(using Quotes): String =
+    arityOf(OpReflect.outputType(opType)) match
+      case Arity.Fire => "fire"
+      case Arity.Call(_) => "call"
+      case Arity.Get(_) => "get"
 
   /** Extracts the refined `DoneOperation` element types from the summoned mirror's `Operations`. */
   private def operationTypes[T: Type](doneExpr: Expr[Done.Of[T]])(using Quotes): List[Type[?]] =

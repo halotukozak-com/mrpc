@@ -9,13 +9,22 @@ import scala.quoted.*
  * Annotation reading mirrors made's `getAnnotationImpl` (extensions.scala): each `MetaAnnotation` is
  * captured in the `Metadata` tuple as an `AnnotatedType(Meta, annot)`, so a `<:<` match over the
  * traversed metadata entries locates an annotation and exposes it as a term for value extraction.
+ *
+ * Widened to `private[mrpc]` because it is the shared reflection reused by BOTH the engine and
+ * metadata materialization — one Done-walk path, no fork.
  */
-private[derive] object OpReflect:
+private[mrpc] object OpReflect:
 
-  /** A single parameter: its label, declared type, and method-side annotation facts. */
+  /**
+   * A single parameter: its label, declared type, the raw per-param `Metadata` entries (each an
+   * `AnnotatedType(Meta, annot)`), and the derived `hasVerbatim` fact. `metadataEntries` is threaded
+   * from the same `paramOf` traversal that computes `hasVerbatim`, so the metadata materializer can
+   * reify per-param annotations without a second walk.
+   */
   final case class Param(
     label: String,
     tpe: Type[?],
+    metadataEntries: List[Type[?]],
     hasVerbatim: Boolean,
   )
 
@@ -106,7 +115,7 @@ private[derive] object OpReflect:
     val metaEntries = repr.select(repr.typeSymbol.typeMember("Metadata")).dealias.asType match
       case '[type meta <: Tuple; meta] => TupleTraverse.traverseTuple(Type.of[meta])
       case _ => Nil
-    Param(label, tpe, metaEntries.exists(isAnnotation[mrpc.annotation.verbatim]))
+    Param(label, tpe, metaEntries, metaEntries.exists(isAnnotation[mrpc.annotation.verbatim]))
 
   /** Locates an annotation term of type `A` in the op's `Metadata`, like made's `getAnnotationImpl`. */
   private def findAnnotation[A: Type](using q: Quotes)(opType: Type[?]): Option[q.reflect.Term] =
