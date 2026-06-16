@@ -4,7 +4,7 @@ import scala.concurrent.{ExecutionContext, Future}
 
 import mcodec.MCodec
 
-import mrpc.annotation.{rpcName, RpcTag}
+import mrpc.annotation.{multi, rpcName, RpcTag}
 import mrpc.conv.AsRaw
 import mrpc.raw.RawRpcCompanion
 
@@ -38,8 +38,10 @@ object SampleApi:
     // fire op: empty-parens, Unit result -> routes to `fire`.
     def ping(): Unit
 
-    // call ops: Future of a primitive and of the DTO -> route to `call`.
-    def increment(n: Int): Future[Int]
+    // call ops: Future of a primitive and of the DTO -> route to `call`. The `@multi` marker on `n`
+    // is additive — it carries a queryable per-param annotation for the metadata surface; the matcher
+    // ignores it under the fixed-RawRpc model, so the derive suites stay green.
+    def increment(@multi n: Int): Future[Int]
     def find(id: Int): Future[User]
 
     // sub-RPC getter -> routes to `get`; UsersRpc is a distinct trait, not self-referential.
