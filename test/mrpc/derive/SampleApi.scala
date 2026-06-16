@@ -34,6 +34,40 @@ object SampleApi:
   trait UsersRpc:
     def count(): Future[Int]
 
+  // Self-referential RPC: a getter returning the SAME trait — the headline self-recursion cycle the
+  // lazy seam must break without infinite inline expansion.
+  trait SelfRpc:
+    def value(): Future[Int]
+    def child: SelfRpc
+
+  // Mutually-referential pair: Ping.toPong -> Pong, Pong.toPing -> Ping.
+  trait Ping:
+    def ping(): Future[Int]
+    def toPong: Pong
+  trait Pong:
+    def pong(): Future[Int]
+    def toPing: Ping
+
+  // A fixed deeper SelfRpc level. `child` returns this leaf, so the runtime chain terminates (it does
+  // NOT recurse forever) while still exercising one real nesting level through the recursion seam.
+  private val leafSelf: SelfRpc = new SelfRpc:
+    def value(): Future[Int] = Future.successful(99)
+    def child: SelfRpc = this
+
+  // A terminating self-referential impl: `child` hands back the fixed leaf, not an unbounded chain.
+  val selfImpl: SelfRpc = new SelfRpc:
+    def value(): Future[Int] = Future.successful(1)
+    def child: SelfRpc = leafSelf
+
+  // A terminating mutual pair: each side's getter returns the peer; the peers are fixed instances so
+  // the runtime hop chain stays bounded.
+  val pingImpl: Ping = new Ping:
+    def ping(): Future[Int] = Future.successful(10)
+    def toPong: Pong = pongImpl
+  val pongImpl: Pong = new Pong:
+    def pong(): Future[Int] = Future.successful(20)
+    def toPing: Ping = pingImpl
+
   trait SampleApi:
     // fire op: empty-parens, Unit result -> routes to `fire`.
     def ping(): Unit
