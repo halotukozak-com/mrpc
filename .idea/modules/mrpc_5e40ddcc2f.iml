@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<module external.linked.project.id="file:$MODULE_DIR$/../../.scala-build/?id=mrpc_5e40ddcc2f" external.linked.project.path="$MODULE_DIR$/../.." external.root.project.path="$MODULE_DIR$/../.." external.system.id="BSP" type="JAVA_MODULE" version="4">
+  <component name="NewModuleRootManager" LANGUAGE_LEVEL="JDK_21">
+    <output url="file://$MODULE_DIR$/../../.scala-build/mrpc_5e40ddcc2f/classes/main" />
+    <output-test url="file://$MODULE_DIR$/../../.scala-build/mrpc_5e40ddcc2f/classes/test" />
+    <exclude-output />
+    <content url="file://$MODULE_DIR$/../..">
+      <sourceFolder url="file://$MODULE_DIR$/../../project.scala" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/../../src/mrpc/annotation/arity.scala" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/../../src/mrpc/annotation/encoding.scala" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/../../src/mrpc/annotation/metadataStrategy.scala" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/../../src/mrpc/annotation/methodName.scala" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/../../src/mrpc/annotation/rpcName.scala" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/../../src/mrpc/annotation/rpcNamePrefix.scala" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/../../src/mrpc/annotation/tags.scala" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/../../src/mrpc/codec/JsonRawValue.scala" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/../../src/mrpc/conv/AsRaw.scala" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/../../src/mrpc/conv/AsRawReal.scala" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/../../src/mrpc/conv/AsReal.scala" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/../../src/mrpc/derive/AsRawDerivation.scala" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/../../src/mrpc/derive/AsRealDerivation.scala" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/../../src/mrpc/derive/Matcher.scala" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/../../src/mrpc/derive/MetadataDerivation.scala" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/../../src/mrpc/derive/OpPlan.scala" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/../../src/mrpc/derive/OpReflect.scala" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/../../src/mrpc/derive/RpcName.scala" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/../../src/mrpc/derive/TupleTraverse.scala" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/../../src/mrpc/meta/RpcMetadata.scala" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/../../src/mrpc/meta/RpcMetadataCompanion.scala" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/../../src/mrpc/raw/RawInvocation.scala" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/../../src/mrpc/raw/RawRpc.scala" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/../../src/mrpc/raw/RawRpcCompanion.scala" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/../../test/mrpc/McodecSpikeTest.scala" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/../../test/mrpc/ScaffoldSmokeTest.scala" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/../../test/mrpc/annotation/AnnotationCaptureSuite.scala" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/../../test/mrpc/codec/LeafCodecProps.scala" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/../../test/mrpc/codec/LeafCodecSuite.scala" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/../../test/mrpc/conv/AsRawRealSuite.scala" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/../../test/mrpc/conv/AsRawSuite.scala" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/../../test/mrpc/conv/AsRealSuite.scala" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/../../test/mrpc/conv/ConvRoundTripProps.scala" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/../../test/mrpc/derive/AbstractRawSummonSpike.scala" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/../../test/mrpc/derive/CompileErrorSuite.scala" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/../../test/mrpc/derive/DispatchSafetySuite.scala" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/../../test/mrpc/derive/LoopbackSuite.scala" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/../../test/mrpc/derive/MatchingSuite.scala" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/../../test/mrpc/derive/RecursionSpikeSuite.scala" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/../../test/mrpc/derive/RecursionSuite.scala" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/../../test/mrpc/derive/RpcNameSuite.scala" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/../../test/mrpc/derive/SampleApi.scala" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/../../test/mrpc/meta/MetadataStrategySuite.scala" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/../../test/mrpc/meta/MetadataSuite.scala" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/../../test/mrpc/raw/RawInvocationSuite.scala" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/../../test/mrpc/raw/RawRpcCompanionSuite.scala" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/../../test/mrpc/raw/RawRpcSuite.scala" isTestSource="true" />
+      <excludeFolder url="file://$MODULE_DIR$/../../.bloop" />
+      <excludeFolder url="file://$MODULE_DIR$/../../.bsp" />
+      <excludeFolder url="file://$MODULE_DIR$/../../.scala-build" />
+    </content>
+    <orderEntry type="jdk" jdkName="BSP_Home" jdkType="JavaSDK" />
+    <orderEntry type="sourceFolder" forTests="false" />
+    <orderEntry type="library" name="BSP: scala-sdk-3.8.4" level="project" />
+    <orderEntry type="library" scope="TEST" name="BSP: compiler-interface-1.10.7" level="project" />
+    <orderEntry type="library" scope="TEST" name="BSP: hamcrest-core-1.3" level="project" />
+    <orderEntry type="library" scope="TEST" name="BSP: junit-4.13.2" level="project" />
+    <orderEntry type="library" scope="TEST" name="BSP: junit-interface-1.3.3" level="project" />
+    <orderEntry type="library" name="BSP: made_3__1" level="project" />
+    <orderEntry type="library" scope="TEST" name="BSP: made_3__1" level="project" />
+    <orderEntry type="library" name="BSP: mcodec_3__1" level="project" />
+    <orderEntry type="library" scope="TEST" name="BSP: mcodec_3__1" level="project" />
+    <orderEntry type="module-library" scope="TEST">
+      <library name="BSP: mrpc_5e40ddcc2f test dependencies">
+        <CLASSES />
+        <JAVADOC />
+        <SOURCES>
+          <root url="jar://$USER_HOME$/.ivy2/local/io.github.halotukozak/made_3/0.1.3-done-SNAPSHOT/srcs/made_3-sources.jar!/" />
+          <root url="jar://$USER_HOME$/.ivy2/local/io.github.halotukozak/mcodec_3/0.0.0-done-SNAPSHOT/srcs/mcodec_3-sources.jar!/" />
+        </SOURCES>
+      </library>
+    </orderEntry>
+    <orderEntry type="library" scope="TEST" name="BSP: munit-diff_3-1.3.3" level="project" />
+    <orderEntry type="library" scope="TEST" name="BSP: munit-scalacheck_3-1.3.0" level="project" />
+    <orderEntry type="library" scope="TEST" name="BSP: munit_3-1.3.3" level="project" />
+    <orderEntry type="library" scope="TEST" name="BSP: portable-scala-reflect_2.13-1.1.3" level="project" />
+    <orderEntry type="library" scope="TEST" name="BSP: scala-asm-9.9.0-scala-1" level="project" />
+    <orderEntry type="library" name="BSP: scala-library-3.8.4" level="project" />
+    <orderEntry type="library" scope="TEST" name="BSP: scala-library-3.8.4" level="project" />
+    <orderEntry type="library" scope="TEST" name="BSP: scala3-compiler_3-3.8.4" level="project" />
+    <orderEntry type="library" scope="TEST" name="BSP: scala3-interfaces-3.8.4" level="project" />
+    <orderEntry type="library" name="BSP: scala3-library_3-3.8.4" level="project" />
+    <orderEntry type="library" scope="TEST" name="BSP: scala3-library_3-3.8.4" level="project" />
+    <orderEntry type="library" scope="TEST" name="BSP: scalacheck_3-1.19.0" level="project" />
+    <orderEntry type="library" name="BSP: semanticdb-javac-0.10.0" level="project" />
+    <orderEntry type="library" scope="TEST" name="BSP: semanticdb-javac-0.10.0" level="project" />
+    <orderEntry type="library" scope="TEST" name="BSP: tasty-core_3-3.8.4" level="project" />
+    <orderEntry type="library" scope="TEST" name="BSP: test-interface-1.0" level="project" />
+    <orderEntry type="library" scope="TEST" name="BSP: util-interface-1.10.7" level="project" />
+  </component>
+</module>
