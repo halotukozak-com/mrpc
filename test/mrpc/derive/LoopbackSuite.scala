@@ -1,24 +1,67 @@
 package mrpc.derive
 
+import scala.concurrent.duration.Duration
+import scala.concurrent.{Await, ExecutionContext, Future}
+
+import mrpc.conv.{AsRaw, AsReal}
 import mrpc.derive.SampleApi.*
+import mrpc.raw.RawRpc
 
 /**
- * Wave 0 scaffold for the real->raw->real loopback over the sample trait. Bodies are pending until
- * the server adapter and client proxy land.
+ * The headline real->raw->real loopback over the sample trait: materialize a real `SampleApi` impl
+ * to a `RawRpc[String]` server adapter, materialize that raw rpc back to a `SampleApi` CLIENT PROXY,
+ * then drive typed calls on the proxy and assert the values match the original impl's behaviour. This
+ * exercises the full round-trip for the `call`, `fire`, and (non-recursive) sub-RPC `get` arities.
  */
 class LoopbackSuite extends munit.FunSuite:
 
-  // The concrete Raw=String companion the loopback will materialize against.
-  private val codec: SampleApiCodec.type = SampleApiCodec
+  // The leaf JSON codec givens and a parasitic ExecutionContext must be in scope where both
+  // directions are materialized (the abstract-Raw summon proof established this placement).
+  import mrpc.codec.JsonRawValue.given
+  given ExecutionContext = ExecutionContext.parasitic
 
-  test("a call op round-trips real->raw->real and returns the right value".ignore):
-    // TODO: filled by the server adapter and client proxy — materialize both, call find, assert.
-    val _ = codec
+  private var pinged: Boolean = false
 
-  test("a fire op routes to fire".ignore):
-    // TODO: filled by the server adapter and client proxy — assert ping reaches the fire path.
-    ()
+  // A concrete real implementation. `pinged` lets the fire round-trip observe the side effect.
+  private val impl: SampleApi = new SampleApi:
+    def ping(): Unit = pinged = true
+    def increment(n: Int): Future[Int] = Future.successful(n + 1)
+    def find(id: Int): Future[User] = Future.successful(User(id, s"user-$id"))
+    def users: UsersRpc = new UsersRpc:
+      def count(): Future[Int] = Future.successful(7)
+    def lookup(id: Int): Future[User] = Future.successful(User(id, "by-id"))
+    def lookup(name: String): Future[User] = Future.successful(User(-1, name))
+    def combine(a: Int)(b: String, c: Long): Future[String] = Future.successful(s"$a-$b-$c")
+    def echoBool(b: Boolean): Future[Boolean] = Future.successful(b)
+    def findRenamed(id: Int): Future[User] = Future.successful(User(id, "renamed"))
 
-  test("a sub-RPC getter routes to get".ignore):
-    // TODO: filled by the server adapter and client proxy — assert users reaches the get path.
-    ()
+  // The non-recursive sub-RPC conversions both directions route through (the get/recursion seams
+  // summon these). Bound as givens so the eager summon inside each derivation resolves.
+  private given AsRaw[RawRpc[String], UsersRpc] = SampleApiCodec.materializeAsRaw[UsersRpc]
+  private given AsReal[RawRpc[String], UsersRpc] = SampleApiCodec.materializeAsReal[UsersRpc]
+
+  // real -> raw (server adapter) -> real (client proxy): the full loopback under test.
+  private val rawRpc: RawRpc[String] = SampleApiCodec.materializeAsRaw[SampleApi].asRaw(impl)
+  private val proxy: SampleApi = SampleApiCodec.materializeAsReal[SampleApi].asReal(rawRpc)
+
+  private def await[A](f: Future[A]): A = Await.result(f, Duration.Inf)
+
+  test("a call op round-trips real->raw->real and returns the right value"):
+    assertEquals(await(proxy.increment(41)), 42)
+    assertEquals(await(proxy.find(7)), User(7, "user-7"))
+
+  test("a multi-param-list call op round-trips through nested args"):
+    assertEquals(await(proxy.combine(1)("x", 2L)), "1-x-2")
+
+  test("a primitive/wrapper-returning call op round-trips without a verify error"):
+    assertEquals(await(proxy.echoBool(true)), true)
+    assertEquals(await(proxy.echoBool(false)), false)
+
+  test("a fire op routes through fire and reaches the real impl"):
+    pinged = false
+    proxy.ping()
+    assert(pinged)
+
+  test("a sub-RPC getter round-trips real->raw->real through the get->call path"):
+    val users: UsersRpc = proxy.users
+    assertEquals(await(users.count()), 7)

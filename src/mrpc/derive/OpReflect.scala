@@ -30,6 +30,26 @@ private[derive] object OpReflect:
   def outputType(opType: Type[?])(using Quotes): Type[?] =
     memberType(opType, "OutputType").asType
 
+  /**
+   * The op's per-parameter-list arities, read off its `ParamLists` (a tuple of singleton `Int`s).
+   * The client proxy uses these to split a flat encoded-argument list back into the nested
+   * `List[List[Raw]]` shape `RawInvocation` expects (the inverse of the server adapter's `flatten`):
+   *   - `EmptyTuple`            (no-parens `def f` / `val`)  -> `Nil`
+   *   - `0 *: EmptyTuple`       (empty-parens `def f()`)     -> `List(0)`
+   *   - `1 *: 2 *: EmptyTuple`  (`def f(a)(b, c)`)           -> `List(1, 2)`
+   */
+  def paramListSizes(opType: Type[?])(using Quotes): List[Int] =
+    import quotes.reflect.*
+    memberType(opType, "ParamLists").asType match
+      case '[type lists <: Tuple; lists] =>
+        TupleTraverse.traverseTuple(Type.of[lists]).map { t =>
+          TypeRepr.of(using t).dealias match
+            case ConstantType(IntConstant(n)) => n
+            case other =>
+              report.errorAndAbort(s"ParamLists entry is not an Int literal: ${other.show}")
+        }
+      case _ => report.errorAndAbort("ParamLists is not a tuple")
+
   /** The op's flattened `InputElems`, each projected into a [[Param]]. */
   def inputElems(opType: Type[?])(using Quotes): List[Param] =
     import quotes.reflect.*
