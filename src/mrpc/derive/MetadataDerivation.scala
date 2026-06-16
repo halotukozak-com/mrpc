@@ -18,8 +18,13 @@ import mrpc.meta.{OperationMetadata, ParamMetadata, RpcMetadata}
  *
  * Contrast `AsRawDerivation`: this materializer synthesizes no new class symbol, calls no operation,
  * decodes no arguments, and performs no runtime cast. The only genuinely-new helper is
- * [[reifyAnnotations]], mirroring made's `getAnnotationImpl` but collecting ALL captured
+ * [[collectAnnotations]], mirroring made's `getAnnotationImpl` but collecting ALL captured
  * `AnnotatedType(Meta, annot)` entries into runtime `Annotation` instances instead of finding one.
+ *
+ * The metadata-strategy markers are honored STRUCTURALLY: the `operations` list is the per-method
+ * projection and each op's `params` list is the per-param projection — there is NO per-annotation
+ * steering of which slot collects what (the full strategy DSL is deferred). The split is fixed by the
+ * value-type shape; recognition lives in `RpcMetadata.recognizedStrategies`.
  */
 private[mrpc] object MetadataDerivation:
 
@@ -37,10 +42,10 @@ private[mrpc] object MetadataDerivation:
         val arity = Matcher.arityTagOf(opTpe) // reuse: the engine's arity classifier
         val paramExprs: List[Expr[ParamMetadata]] =
           OpReflect.inputElems(opTpe).map { p =>
-            val pAnnots = reifyAnnotations(p.metadataEntries)
+            val pAnnots = collectAnnotations(p.metadataEntries)
             '{ ParamMetadata(${ Expr(p.label) }, $pAnnots) }
           }
-        val opAnnots = reifyAnnotations(OpReflect.metadataEntries(opTpe))
+        val opAnnots = collectAnnotations(OpReflect.metadataEntries(opTpe))
         '{
           OperationMetadata(
             ${ Expr(name) },
@@ -53,7 +58,7 @@ private[mrpc] object MetadataDerivation:
       }
 
     // Trait-level annotation fold is not required by the structural v1 surface (the must is per-op +
-    // per-param). A future trait-level fixture can reuse `reifyAnnotations` over a trait-level
+    // per-param). A future trait-level fixture can reuse `collectAnnotations` over a trait-level
     // metadata read here.
     val traitAnnots: Expr[List[Annotation]] = '{ List.empty[Annotation] }
 
@@ -64,7 +69,7 @@ private[mrpc] object MetadataDerivation:
    * instances. Mirrors made's `getAnnotationImpl` extraction (`annot.asExprOf`) but collects ALL
    * entries rather than the first match — the metadata surface exposes every annotation for querying.
    */
-  private def reifyAnnotations(entries: List[Type[?]])(using q: Quotes): Expr[List[Annotation]] =
+  private def collectAnnotations(entries: List[Type[?]])(using q: Quotes): Expr[List[Annotation]] =
     import q.reflect.*
     val terms: List[Expr[Annotation]] = entries
       .map(t => TypeRepr.of(using t))
