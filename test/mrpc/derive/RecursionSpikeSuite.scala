@@ -1,0 +1,90 @@
+package mrpc.derive
+
+import scala.concurrent.duration.Duration
+import scala.concurrent.{Await, ExecutionContext, Future}
+
+import mcodec.Json
+
+import mrpc.conv.{AsRaw, AsReal}
+import mrpc.derive.SampleApi.*
+import mrpc.raw.RawRpc
+
+/**
+ * Wave-0 de-risking proof for the one genuinely new engine piece: lazy sub-RPC recursion. It proves
+ * that mechanism A (the `AsRaw.makeLazy` / `AsReal.makeLazy` by-name wrapper) breaks both the
+ * self-referential (`SelfRpc.child: SelfRpc`) and the mutually-referential (`Ping.toPong`/
+ * `Pong.toPing`) cycles WITHOUT infinite inline expansion under `-Ycheck:macros`, and round-trips
+ * one nesting level real->raw->real.
+ *
+ * The cycle is broken at the given-resolution layer: each recursive adapter is held in a
+ * `lazy val given` that the `makeLazy` thunk reads BACK (Pitfall 1) — the eager `get`-seam summon
+ * resolves to the already-declared lazy given instead of re-entering `materialize*[Sub]`, so macro
+ * expansion reaches a fixed point. The by-name thunk forces the lazy val only at the first runtime
+ * `get`, not during expansion.
+ *
+ * It also resolves the VAL-01 empirical question: whether mcodec `Json.write` output matches the
+ * committed golden fixtures byte-for-byte for primitives AND objects. The verdict is recorded in
+ * 06-FINDINGS.md.
+ */
+class RecursionSpikeSuite extends munit.FunSuite:
+
+  // Leaf JSON codec givens + parasitic EC must be in scope where both directions are materialized.
+  import mrpc.codec.JsonRawValue.given
+  given ExecutionContext = ExecutionContext.parasitic
+
+  private def await[A](f: Future[A]): A = Await.result(f, Duration.Inf)
+
+  // --- Self-referential wiring (mechanism A) -------------------------------------------------------
+  // The recursive adapter is held in a `lazy val given` the seam summons back; makeLazy defers forcing
+  // it past macro expansion, so the SelfRpc -> SelfRpc cycle terminates at expansion time.
+  private lazy val selfRaw: AsRaw[RawRpc[String], SelfRpc] =
+    AsRaw.makeLazy(SampleApiCodec.materializeAsRaw[SelfRpc])
+  private lazy val selfReal: AsReal[RawRpc[String], SelfRpc] =
+    AsReal.makeLazy(SampleApiCodec.materializeAsReal[SelfRpc])
+  private given AsRaw[RawRpc[String], SelfRpc] = selfRaw
+  private given AsReal[RawRpc[String], SelfRpc] = selfReal
+
+  // --- Mutually-referential wiring (mechanism A) ---------------------------------------------------
+  // Ping's adapter needs Pong's and vice versa; each is a lazy given read back through makeLazy so the
+  // Ping<->Pong cycle resolves the peer to the lazy placeholder rather than re-deriving it.
+  private lazy val pingRaw: AsRaw[RawRpc[String], Ping] =
+    AsRaw.makeLazy(SampleApiCodec.materializeAsRaw[Ping])
+  private lazy val pingReal: AsReal[RawRpc[String], Ping] =
+    AsReal.makeLazy(SampleApiCodec.materializeAsReal[Ping])
+  private lazy val pongRaw: AsRaw[RawRpc[String], Pong] =
+    AsRaw.makeLazy(SampleApiCodec.materializeAsRaw[Pong])
+  private lazy val pongReal: AsReal[RawRpc[String], Pong] =
+    AsReal.makeLazy(SampleApiCodec.materializeAsReal[Pong])
+  private given AsRaw[RawRpc[String], Ping] = pingRaw
+  private given AsReal[RawRpc[String], Ping] = pingReal
+  private given AsRaw[RawRpc[String], Pong] = pongRaw
+  private given AsReal[RawRpc[String], Pong] = pongReal
+
+  test("self-referential getter round-trips one nesting level"):
+    val raw: RawRpc[String] = selfRaw.asRaw(selfImpl)
+    val proxy: SelfRpc = selfReal.asReal(raw)
+    assertEquals(await(proxy.value()), 1)
+    // proxy.child crosses the get seam; the deeper level (leafSelf) returns 99.
+    assertEquals(await(proxy.child.value()), 99)
+
+  test("mutually-referential pair round-trips"):
+    val raw: RawRpc[String] = pingRaw.asRaw(pingImpl)
+    val proxy: Ping = pingReal.asReal(raw)
+    assertEquals(await(proxy.ping()), 10)
+    // toPong crosses one get seam, then pong() is a call on the peer.
+    assertEquals(await(proxy.toPong.pong()), 20)
+    // toPong.toPing crosses two get seams back to the Ping side.
+    assertEquals(await(proxy.toPong.toPing.ping()), 10)
+
+  test("primitive fixture JSON matches mcodec Json.write byte-for-byte"):
+    // call_add.json args are [[2,40]]; fire/rename fixtures use 7/404; tagged_emit's tag is "warn".
+    assertEquals(Json.write(2), "2")
+    assertEquals(Json.write(40), "40")
+    assertEquals(Json.write(404), "404")
+    assertEquals(Json.write("warn"), "\"warn\"")
+
+  test("object fixture JSON matches mcodec Json.write byte-for-byte"):
+    // tagged_emit.json object component is {"k1":"v1","k2":"v2"}. mcodec preserves field declaration
+    // order with no whitespace, so the object is byte-for-byte equal (Open Q2 resolved: no
+    // normalization needed for this DTO shape).
+    assertEquals(Json.write(User(1, "v1")), "{\"id\":1,\"name\":\"v1\"}")
