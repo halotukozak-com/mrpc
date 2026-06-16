@@ -20,7 +20,8 @@ import mrpc.raw.{RawInvocation, RawRpc}
  * stays clean even on primitive/wrapper-returning methods (e.g. `echoBool: Future[Boolean]`).
  *
  * The arity routing mirrors the server adapter inversely: `Unit` -> `fire`, `Future[X]` -> `call`
- * (result decoded via `forFuture`), sub-RPC -> `get` (a SINGLE summon seam, recursion deferred).
+ * (result decoded via `forFuture`), sub-RPC -> `get` (a SINGLE summon seam, lazily recursive via
+ * `AsReal.makeLazy` so self/mutually-referential sub-RPCs derive without infinite inline expansion).
  */
 object AsRealDerivation:
 
@@ -191,9 +192,13 @@ object AsRealDerivation:
       case Arity.Get(subRpcType) =>
         subRpcType match
           case '[sub] =>
-            // RECURSION SEAM: the sub-RPC's client proxy is summoned at this SINGLE site. For a
-            // distinct (non-recursive) sub-RPC trait the eager summon is safe; self/mutual recursion
-            // is out of scope here (a later phase wraps this one summon in laziness — keep it single).
+            // RECURSION SEAM (lazily recursive): the sub-RPC's client proxy is summoned at this SINGLE
+            // site, then consumed through `AsReal.makeLazy` so the recursive instance is forced lazily
+            // (at first runtime `get`), NOT during macro expansion. A self- or mutually-referential
+            // sub-RPC binds its proxy as a `lazy val given = makeLazy(...)`; the eager summon here
+            // resolves to that already-declared lazy given instead of re-entering `materialize*[Sub]`,
+            // so derivation reaches a fixed point with one real proxy per type. Non-recursive sub-RPCs
+            // are unaffected. Keep it a SINGLE summon site.
             val subProxy = Expr
               .summon[AsReal[RawRpc[Raw], sub]]
               .getOrElse(
@@ -202,7 +207,7 @@ object AsRealDerivation:
                     s"${TypeRepr.of[sub].show}] for '${plan.rpcName}'",
                 ),
               )
-            '{ $subProxy.asReal($raw.get($invocation)) }.asTerm
+            '{ AsReal.makeLazy[RawRpc[Raw], sub]($subProxy).asReal($raw.get($invocation)) }.asTerm
 
   /**
    * Builds `RawInvocation(<rpcName>, <nested encoded args>)`. Each argument is encoded to `Raw` via a

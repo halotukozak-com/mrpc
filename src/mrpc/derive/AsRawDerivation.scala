@@ -145,9 +145,13 @@ object AsRawDerivation:
         case Arity.Get(subRpcType) =>
           subRpcType match
             case '[sub] =>
-              // RECURSION SEAM: the sub-RPC's server adapter is summoned at this SINGLE site. For a
-              // distinct (non-recursive) sub-RPC trait the eager summon is safe; self/mutual recursion
-              // is out of scope here (a later phase wraps this one summon in laziness — keep it single).
+              // RECURSION SEAM (lazily recursive): the sub-RPC's server adapter is summoned at this
+              // SINGLE site, then consumed through `AsRaw.makeLazy` so the recursive instance is forced
+              // lazily (at first runtime `get`), NOT during macro expansion. A self- or mutually-
+              // referential sub-RPC binds its adapter as a `lazy val given = makeLazy(...)`; the eager
+              // summon here resolves to that already-declared lazy given instead of re-entering
+              // `materialize*[Sub]`, so derivation reaches a fixed point with one real adapter per type.
+              // Non-recursive sub-RPCs are unaffected. Keep it a SINGLE summon site.
               val subAdapter = Expr
                 .summon[AsRaw[RawRpc[Raw], sub]]
                 .getOrElse(
@@ -158,7 +162,7 @@ object AsRawDerivation:
                 )
               // Read the real sub-RPC instance off the api (a no-arg getter) and adapt it.
               val subInstance = invokeOp[Raw, Real](api, inv, plan, done).asExprOf[sub]
-              '{ $subAdapter.asRaw($subInstance) }
+              '{ AsRaw.makeLazy[RawRpc[Raw], sub]($subAdapter).asRaw($subInstance) }
         case _ => reject
     }
 
