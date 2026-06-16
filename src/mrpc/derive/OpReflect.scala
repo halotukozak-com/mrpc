@@ -117,7 +117,12 @@ private[derive] object OpReflect:
       case Some(Literal(BooleanConstant(b))) => b
       case _ => false
 
-  /** Maps an annotation's primary-constructor parameter names to the applied argument terms. */
+  /**
+   * Maps an annotation's primary-constructor parameter names to the applied argument terms. Handles
+   * both positional args (zipped against the constructor parameter names in order) and `NamedArg`
+   * entries (keyed by their explicit name, overriding the positional mapping). The inner literal is
+   * unwrapped from any `NamedArg`.
+   */
   private def constructorArgs(using q: Quotes)(annot: q.reflect.Term): Map[String, q.reflect.Term] =
     import q.reflect.*
     val ctorParamNames = annot.tpe.typeSymbol.primaryConstructor.paramSymss.flatten
@@ -129,4 +134,18 @@ private[derive] object OpReflect:
       case TypeApply(fun, _) => collectArgs(fun)
       case _ => Nil
 
-    ctorParamNames.zip(collectArgs(annot)).toMap
+    val args = collectArgs(annot)
+    val named: Map[String, Term] = args
+      .collect:
+        case NamedArg(name, value) => name -> value
+      .toMap
+    val positional: Map[String, Term] = ctorParamNames
+      .zip(args)
+      .collect:
+        case (name, arg) =>
+          arg match
+            case NamedArg(_, _) => None
+            case other => Some(name -> other)
+      .flatten
+      .toMap
+    positional ++ named
