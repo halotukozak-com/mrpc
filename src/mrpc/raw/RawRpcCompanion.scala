@@ -1,6 +1,9 @@
 package mrpc.raw
 
+import made.Done
 import mrpc.conv.{AsRaw, AsRawReal, AsReal}
+
+import scala.concurrent.ExecutionContext
 
 /**
  * User-facing entry point a transport chooses a concrete `Raw` for. Exposes type aliases over the
@@ -21,13 +24,13 @@ trait RawRpcCompanion[Raw]:
 
   // The server adapter: a `Real` trait yields a `RawRpc[Raw]`, so its conversion is
   // `AsRaw[RawRpc[Raw], Real]` (distinct from the leaf `AsRawRpc[Real] = AsRaw[Raw, Real]` codec).
-  inline def materializeAsRaw[Real]: AsRaw[RawRpc[Raw], Real] =
-    ${ mrpc.derive.AsRawDerivation.impl[Raw, Real] }
+  inline def materializeAsRaw[Real: Done.Of](using ExecutionContext): AsRaw[RawRpc[Raw], Real] =
+    ${ mrpc.derive.AsRawDerivation.impl[Raw, Real]('summon, 'summon) }
 
   // The client proxy: a `RawRpc[Raw]` yields a `Real` trait implementation, so its conversion is
   // `AsReal[RawRpc[Raw], Real]` (distinct from the leaf `AsRealRpc[Real] = AsReal[Raw, Real]` codec).
-  inline def materializeAsReal[Real]: AsReal[RawRpc[Raw], Real] =
-    ${ mrpc.derive.AsRealDerivation.impl[Raw, Real] }
+  inline def materializeAsReal[Real: Done.Of](using ExecutionContext): AsReal[RawRpc[Raw], Real] =
+    ${ mrpc.derive.AsRealDerivation.impl[Raw, Real]('summon, 'summon) }
 
   // The combined direction is not needed by any consumer yet; it can be assembled from the two
   // separate directions when a use case appears. compiletime.error fires only if called, so the API

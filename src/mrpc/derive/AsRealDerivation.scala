@@ -1,10 +1,11 @@
 package mrpc.derive
 
-import scala.concurrent.{ExecutionContext, Future}
-import scala.quoted.*
-
+import made.Done
 import mrpc.conv.{AsRaw, AsReal}
 import mrpc.raw.{RawInvocation, RawRpc}
+
+import scala.concurrent.{ExecutionContext, Future}
+import scala.quoted.*
 
 /**
  * Client-proxy derivation: builds an `AsReal[RawRpc[Raw], Real]` that turns a transport-facing
@@ -13,7 +14,8 @@ import mrpc.raw.{RawInvocation, RawRpc}
  * forwards to the underlying `RawRpc[Raw]`'s `fire`/`call`/`get` by arity, decoding the result back
  * to the method's EXACT declared type via a summoned `AsReal`.
  *
- * scala3#25245 discipline (the `VerifyError` on macro-generated trait impls): the proxy is generated against the CONCRETE `Real` type
+ * scala3#25245 discipline (the `VerifyError` on macro-generated trait impls that made works around
+ * with `DoneOperationWorkaround[Outer]`): the proxy is generated against the CONCRETE `Real` type
  * argument with no abstract type members. Method bodies and the argument lists are built with the
  * exact concrete parameter/result types read off the trait's own method symbols, so `-Ycheck:macros`
  * stays clean even on primitive/wrapper-returning methods (e.g. `echoBool: Future[Boolean]`).
@@ -29,26 +31,14 @@ object AsRealDerivation:
    * the concrete companion (never a global) so the `call` arity can compose the result decoder
    * `AsReal[Future[Raw], Future[r]]` via `forFuture`.
    */
-  def impl[Raw: Type, Real: Type](using Quotes): Expr[AsReal[RawRpc[Raw], Real]] =
-    import quotes.reflect.*
-
-    val ecExpr = Expr.summon[ExecutionContext].getOrElse {
-      report.errorAndAbort(
-        "no ExecutionContext in scope for the client proxy's call-result composition; " +
-          "bring one into the companion (e.g. `given ExecutionContext = ...`)",
-      )
-    }
-
-    // The matcher's plans, in declaration order. The proxy aligns each generated
-    // method to its plan BY INDEX rather than by label, because overloaded methods (e.g. two
-    // `lookup`s) share a label but have distinct signatures and distinct plans — a label map would
-    // collapse them.
-    val plans: List[OpPlan] = Matcher.planAll[Real]
+  def impl[Raw: Type, Real: Type](done: Expr[Done.Of[Real]], ec: Expr[ExecutionContext])(using Quotes)
+    : Expr[AsReal[RawRpc[Raw], Real]] =
+    val plans: List[OpPlan] = Matcher.planAll[Real](done)
 
     '{
       new AsReal[RawRpc[Raw], Real]:
         def asReal(raw: RawRpc[Raw]): Real =
-          ${ proxyExpr[Raw, Real]('raw, plans, ecExpr) }
+          ${ proxyExpr[Raw, Real]('raw, plans, ec) }
     }
 
   /**
@@ -67,10 +57,10 @@ object AsRealDerivation:
 
     val parents = List(TypeTree.of[Object], TypeTree.of[Real])
 
-    // Recover each member symbol by its declaration index (the matcher and `operationMembers` share
-    // one enumeration + order), so the member-to-plan correspondence is exact even across overloads.
-    // `memberType` then yields the member's precise (parameter + result) signature for the override.
-    val membersToImplement: List[Symbol] = plans.map(p => OpReflect.operationMembers[Real](p.index))
+    // Recover each member symbol straight from its planned operation type (`OuterType` = Real), so the
+    // member-to-plan correspondence is exact even across overloads. `memberType` then yields the
+    // member's precise (parameter + result) signature for the synthesized override.
+    val membersToImplement: List[Symbol] = plans.map(planMember[Real])
 
     def decls(cls: Symbol): List[Symbol] =
       membersToImplement.map { m =>
@@ -110,6 +100,44 @@ object AsRealDerivation:
     Block(List(clsDef), instance).asExprOf[Real]
 
   /**
+   * Resolves the real-trait member symbol an [[OpPlan]] describes. The plan's `label` gives the
+   * member name; for overloaded members (same name, distinct signatures) it disambiguates by matching
+   * the member's flattened parameter types against the plan's `params` types.
+   */
+  private def planMember[Real: Type](plan: OpPlan)(using Quotes): quotes.reflect.Symbol =
+    import quotes.reflect.*
+    val realTpe = TypeRepr.of[Real]
+    val candidates = realTpe.typeSymbol.methodMembers
+      .filter(m => m.isDefDef && m.flags.is(Flags.Deferred) && m.name == plan.label)
+    candidates match
+      case single :: Nil => single
+      case Nil =>
+        report.errorAndAbort(s"no abstract member named '${plan.label}' on ${realTpe.show}")
+      case many =>
+        val wantParams = plan.params.map(p => TypeRepr.of(using p.paramType))
+        many
+          .find { m =>
+            val mParams = flattenParamTypes(realTpe.memberType(m).widen)
+            mParams.length == wantParams.length && mParams.zip(wantParams).forall { case (a, b) => a =:= b }
+          }
+          .getOrElse(
+            report.errorAndAbort(
+              s"could not disambiguate overloaded member '${plan.label}' by parameter types",
+            ),
+          )
+
+  /** Flattens a (possibly curried) method type's parameter types in declaration order. */
+  private def flattenParamTypes(
+    using q: Quotes,
+  )(
+    mt: q.reflect.TypeRepr,
+  ): List[q.reflect.TypeRepr] =
+    import q.reflect.*
+    mt match
+      case MethodType(_, paramTypes, res) => paramTypes ++ flattenParamTypes(res)
+      case _ => Nil
+
+  /**
    * Builds one proxy method body: package a [[RawInvocation]] (resolved `rpcName` + nested encoded
    * args) and forward to `raw.fire`/`raw.call`/`raw.get` by the planned arity, decoding the result
    * back to the method's exact declared type.
@@ -128,9 +156,7 @@ object AsRealDerivation:
     // order the matcher's `plan.params` follow.
     val flatArgTerms: List[Term] = argss.flatten.collect { case t: Term => t }
 
-    // The proxy method overrides the real member, so its own parameter lists ARE the member's:
-    // `argss.map(_.size)` gives the per-param-list arities to re-nest the encoded args (no reflection).
-    val invocation = invocationExpr[Raw](plan, flatArgTerms, argss.map(_.size))
+    val invocation = invocationExpr[Raw](plan, flatArgTerms)
 
     plan.arity match
       case Arity.Fire =>
@@ -182,7 +208,6 @@ object AsRealDerivation:
   )(
     plan: OpPlan,
     flatArgTerms: List[q.reflect.Term],
-    paramListSizes: List[Int],
   ): Expr[RawInvocation[Raw]] =
     import q.reflect.*
 
@@ -210,7 +235,8 @@ object AsRealDerivation:
     // Split the flat encoded args into nested per-param-list lists. An empty-parens op (e.g. `ping()`,
     // `count()`) has `ParamLists = List(0)`, so it yields `List(List())`; commons/mrpc dispatch treats
     // such a call as `Nil` args, so collapse all-empty nestings to an empty outer list.
-    val nested: List[List[Expr[Raw]]] = splitBySizes(encodedArgs, paramListSizes)
+    val sizes = OpReflect.paramListSizes(plan.opType)
+    val nested: List[List[Expr[Raw]]] = splitBySizes(encodedArgs, sizes)
     val nestedExprs: List[Expr[List[Raw]]] = nested.map(inner => Expr.ofList(inner))
     val argsExpr: Expr[List[List[Raw]]] =
       if nested.forall(_.isEmpty) then '{ Nil } else Expr.ofList(nestedExprs)

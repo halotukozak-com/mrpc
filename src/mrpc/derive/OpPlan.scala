@@ -32,9 +32,11 @@ private[derive] final case class OpPlan(
   arity: Arity,
   params: List[ParamPlan],
   resultEncoding: Encoding,
-  // The operation's position in declaration order. Consumers recover the trait member symbol with
-  // `OpReflect.operationMembers[Real](index)` to emit a direct `api.<member>(args)` call (server) or
-  // align the proxy override (client). A macro-only payload, absent from the runtime `OpDescriptor`.
+  // The operation's refined `DoneOperation` type and its position in `Done.Operations`. The
+  // materialize macros need both to select the exact operation term off the mirror and call the
+  // type-safe `Done.invoke`. They are macro-only payloads (like `paramType`), absent from the
+  // runtime `OpDescriptor` projection.
+  opType: Type[?],
   index: Int,
 )
 

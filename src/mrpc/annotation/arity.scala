@@ -1,5 +1,6 @@
 package mrpc.annotation
 
+import made.annotation.MetaAnnotation
 
 /** Single-value arity marker. Mirrors commons `single`. */
 final class single extends MetaAnnotation

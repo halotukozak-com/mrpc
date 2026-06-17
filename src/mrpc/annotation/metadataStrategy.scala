@@ -1,5 +1,6 @@
 package mrpc.annotation
 
+import made.annotation.MetaAnnotation
 
 /**
  * Marks a metadata slot that collects per-RPC-method metadata. Mirrors commons `rpcMethodMetadata`.

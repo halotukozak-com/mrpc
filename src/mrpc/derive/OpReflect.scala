@@ -3,157 +3,178 @@ package mrpc.derive
 import scala.quoted.*
 
 /**
- * Direct, compile-time introspection of a real RPC trait — the self-contained, commons-style
- * replacement for the former `made.Done` walk. Instead of summoning a reflection mirror and reading
- * its refined type members, this reads the trait's own method symbols straight off `quotes.reflect`:
- * member name (`Label`), result type (`OutputType`), parameter lists (`InputElems`/`ParamLists`), and
- * `MetaAnnotation`s (read from `sym.annotations`, not a captured `Metadata` tuple).
+ * Reflection helpers that read the type-level members of a refined `DoneOperation` (and its
+ * `InputElem`s) — `Label`, `OutputType`, `InputElems`, and the method/param `Metadata` chains.
  *
- * Member selection mirrors commons (and made's old `derivedImpl`) so the SAME operations are picked:
- * user-declared `def`/`val`s, in declaration order, excluding constructors, synthetic/artifact
- * members, and the universal/Product/Equals/Enum surface. Keeping the filter identical preserves v1
- * behavior parity.
+ * Annotation reading mirrors made's `getAnnotationImpl` (extensions.scala): each `MetaAnnotation` is
+ * captured in the `Metadata` tuple as an `AnnotatedType(Meta, annot)`, so a `<:<` match over the
+ * traversed metadata entries locates an annotation and exposes it as a term for value extraction.
  *
- * Widened to `private[mrpc]`: shared by the engine (matching/dispatch) and metadata materialization —
- * one introspection path, no fork.
+ * Widened to `private[mrpc]` because it is the shared reflection reused by BOTH the engine and
+ * metadata materialization — one Done-walk path, no fork.
  */
 private[mrpc] object OpReflect:
 
   /**
-   * A single parameter, read off the method's parameter symbol. Fully portable (no `quotes.reflect`
-   * payload): label, declared type, and the derived `hasVerbatim` fact. Raw annotation terms (for
-   * metadata reification) are read separately via [[paramAnnotations]] within the consumer's scope.
+   * A single parameter: its label, declared type, the raw per-param `Metadata` entries (each an
+   * `AnnotatedType(Meta, annot)`), and the derived `hasVerbatim` fact. `metadataEntries` is threaded
+   * from the same `paramOf` traversal that computes `hasVerbatim`, so the metadata materializer can
+   * reify per-param annotations without a second walk.
    */
   final case class Param(
     label: String,
     tpe: Type[?],
+    metadataEntries: List[Type[?]],
     hasVerbatim: Boolean,
   )
 
-  private def excludedOwners(using Quotes): Set[quotes.reflect.Symbol] =
+  /** The op's `Label` singleton-string member as a plain `String`. */
+  def labelOf(opType: Type[?])(using Quotes): String =
     import quotes.reflect.*
-    Set(
-      defn.AnyClass,
-      defn.AnyValClass,
-      TypeRepr.of[Object].typeSymbol,
-      TypeRepr.of[Product].typeSymbol,
-      TypeRepr.of[Equals].typeSymbol,
-      TypeRepr.of[scala.reflect.Enum].typeSymbol,
-    )
+    memberType(opType, "Label") match
+      case ConstantType(StringConstant(s)) => s
+      case other => report.errorAndAbort(s"operation Label is not a string literal: ${other.show}")
+
+  /** The op's `OutputType` member as a `Type`. */
+  def outputType(opType: Type[?])(using Quotes): Type[?] =
+    memberType(opType, "OutputType").asType
 
   /**
-   * The trait's RPC operation member symbols, in declaration order — the commons/made-faithful filter.
-   * This replaces summoning `Done.Of[T]` and traversing `Done.Operations`.
+   * The op's per-parameter-list arities, read off its `ParamLists` (a tuple of singleton `Int`s).
+   * The client proxy uses these to split a flat encoded-argument list back into the nested
+   * `List[List[Raw]]` shape `RawInvocation` expects (the inverse of the server adapter's `flatten`):
+   *   - `EmptyTuple`            (no-parens `def f` / `val`)  -> `Nil`
+   *   - `0 *: EmptyTuple`       (empty-parens `def f()`)     -> `List(0)`
+   *   - `1 *: 2 *: EmptyTuple`  (`def f(a)(b, c)`)           -> `List(1, 2)`
    */
-  def operationMembers[T: Type](using Quotes): List[quotes.reflect.Symbol] =
+  def paramListSizes(opType: Type[?])(using Quotes): List[Int] =
     import quotes.reflect.*
-    val tSymbol = TypeRepr.of[T].typeSymbol
-    val excluded = excludedOwners
-    (tSymbol.fieldMembers ++ tSymbol.methodMembers).distinct
-      .sortBy(_.pos.fold(Int.MaxValue)(_.start)) // source declaration order (Position has no Ordering)
-      .filter(m => m.isDefDef || m.isValDef)
-      .filterNot(_.isClassConstructor)
-      .filterNot(m => m.flags.is(Flags.Synthetic) || m.flags.is(Flags.Artifact))
-      .filterNot(m => excluded.contains(m.owner))
+    memberType(opType, "ParamLists").asType match
+      case '[type lists <: Tuple; lists] =>
+        TupleTraverse.traverseTuple(Type.of[lists]).map { t =>
+          TypeRepr.of(using t).dealias match
+            case ConstantType(IntConstant(n)) => n
+            case other =>
+              report.errorAndAbort(s"ParamLists entry is not an Int literal: ${other.show}")
+        }
+      case _ => report.errorAndAbort("ParamLists is not a tuple")
 
-  /** The member name — the operation's `Label`. */
-  def labelOf(using Quotes)(member: quotes.reflect.Symbol): String = member.name
-
-  /** The innermost (post-curry) result type of the member — the operation's `OutputType`. */
-  def outputType[T: Type](using Quotes)(member: quotes.reflect.Symbol): Type[?] =
+  /** The op's flattened `InputElems`, each projected into a [[Param]]. */
+  def inputElems(opType: Type[?])(using Quotes): List[Param] =
     import quotes.reflect.*
-    def innermost(tpe: TypeRepr): TypeRepr = tpe match
-      case mt: MethodType => innermost(mt.resType)
-      case ByNameType(u) => u
-      case other => other
-    innermost(TypeRepr.of[T].memberType(member).widen).asType
+    memberType(opType, "InputElems").asType match
+      case '[type elems <: Tuple; elems] =>
+        TupleTraverse.traverseTuple(Type.of[elems]).map(paramOf)
+      case _ => report.errorAndAbort("InputElems is not a tuple")
+
+  /** The op's method-level `Metadata` tuple entries as types (each an `AnnotatedType(Meta, annot)`). */
+  def metadataEntries(opType: Type[?])(using Quotes): List[Type[?]] =
+    memberType(opType, "Metadata").asType match
+      case '[type meta <: Tuple; meta] => TupleTraverse.traverseTuple(Type.of[meta])
+      case _ => Nil
+
+  /** Reads a singleton-string-valued field `field` off an annotation of type `A` on the op, if present. */
+  def stringAnnotationArg[A: Type](opType: Type[?], field: String)(using Quotes): Option[String] =
+    findAnnotation[A](opType).flatMap(annot => extractStringArg(annot, field))
+
+  /** Reads a `Boolean` field `field` off an annotation of type `A` on the op (default `false`). */
+  def booleanAnnotationArg[A: Type](opType: Type[?], field: String)(using Quotes): Option[Boolean] =
+    findAnnotation[A](opType).map(annot => extractBooleanArg(annot, field))
+
+  /** `true` when the op carries an annotation of type `A`. */
+  def hasAnnotation[A: Type](opType: Type[?])(using Quotes): Boolean =
+    findAnnotation[A](opType).isDefined
 
   /**
-   * Per-parameter-list arities (term params only): `Nil` for a no-parens `def`/`val`, `List(0)` for
-   * empty-parens `def f()`, `List(1, 2)` for `def f(a)(b, c)`. The client proxy uses these to split a
-   * flat encoded-arg list back into the nested `List[List[Raw]]` shape `RawInvocation` expects.
+   * Whether a parameter type is the abstract `Raw` carrier. In this standalone matcher `Raw` is not a
+   * concrete in-scope type, so no fixture param matches; the check exists so the `@verbatim` branch is
+   * faithful (verbatim only when the param IS `Raw`) without ever firing on encoded leaf types.
    */
-  def paramListSizes(using Quotes)(member: quotes.reflect.Symbol): List[Int] =
-    member.paramSymss.filterNot(_.exists(_.isType)).map(_.size)
-
-  /** The member's flattened parameters (across all param lists), each projected into a [[Param]]. */
-  def params[T: Type](using Quotes)(member: quotes.reflect.Symbol): List[Param] =
-    import quotes.reflect.*
-    val realTpe = TypeRepr.of[T]
-    val paramSyms = member.paramSymss.flatten.filterNot(_.isType)
-    val paramTypes = flatParamTypes(realTpe.memberType(member).widen)
-    paramSyms.zip(paramTypes).map { case (sym, tpe) =>
-      val hasVerbatim = sym.annotations.exists(a => a.tpe <:< TypeRepr.of[mrpc.annotation.verbatim])
-      Param(sym.name, tpe.asType, hasVerbatim)
-    }
-
-  /** Per-parameter `MetaAnnotation` terms, in flattened declaration order (for metadata reification). */
-  def paramAnnotations(using Quotes)(member: quotes.reflect.Symbol): List[List[quotes.reflect.Term]] =
-    member.paramSymss.flatten.filterNot(_.isType).map(_.annotations.filter(isMetaAnnotation))
-
-  /** The member-level `MetaAnnotation` terms (for rpcName/prefix/arity/tag/metadata reading). */
-  def methodAnnotations(using Quotes)(member: quotes.reflect.Symbol): List[quotes.reflect.Term] =
-    member.annotations.filter(isMetaAnnotation)
-
-  // --- annotation reading (operates on the Term lists above; commons-style, no Done.Metadata) ---
-
-  /** Locates an annotation term of type `A` among `anns`. */
-  def findAnnotation[A: Type](using q: Quotes)(anns: List[q.reflect.Term]): Option[q.reflect.Term] =
-    import q.reflect.*
-    anns.find(_.tpe <:< TypeRepr.of[A])
-
-  def hasAnnotation[A: Type](using q: Quotes)(anns: List[q.reflect.Term]): Boolean =
-    findAnnotation[A](anns).isDefined
-
-  def stringAnnotationArg[A: Type](using q: Quotes)(anns: List[q.reflect.Term], field: String): Option[String] =
-    findAnnotation[A](anns).flatMap(annot => extractStringArg(annot, field))
-
-  def booleanAnnotationArg[A: Type](using q: Quotes)(anns: List[q.reflect.Term], field: String): Option[Boolean] =
-    findAnnotation[A](anns).map(annot => extractBooleanArg(annot, field))
-
-  /** Whether a parameter type is the abstract `Raw` carrier (only thing `@verbatim` may keep verbatim). */
   def isRawCarrier(tpe: Type[?])(using Quotes): Boolean =
     import quotes.reflect.*
-    TypeRepr.of(using tpe).typeSymbol.isAbstractType
+    val repr = TypeRepr.of(using tpe)
+    // An abstract type member / type parameter (no concrete dealias) is the only thing that could be
+    // the engine's `Raw`. Concrete leaf types (Int, String, User, ...) are always encoded.
+    repr.typeSymbol.isAbstractType
 
   // --- internals ---
 
-  private def isMetaAnnotation(using q: Quotes)(annot: q.reflect.Term): Boolean =
+  private def memberType(using q: Quotes)(tpe: Type[?], name: String): q.reflect.TypeRepr =
     import q.reflect.*
-    annot.tpe <:< TypeRepr.of[mrpc.annotation.MetaAnnotation]
+    val repr = TypeRepr.of(using tpe)
+    val member = repr.typeSymbol.typeMember(name)
+    repr.select(member).dealias
 
-  private def flatParamTypes(using q: Quotes)(tpe: q.reflect.TypeRepr): List[q.reflect.TypeRepr] =
-    import q.reflect.*
-    tpe match
-      case MethodType(_, ps, res) => ps ++ flatParamTypes(res)
+  private def paramOf(elemType: Type[?])(using Quotes): Param =
+    import quotes.reflect.*
+    val repr = TypeRepr.of(using elemType)
+    val tpe = repr.select(repr.typeSymbol.typeMember("Type")).dealias.asType
+    val label = repr.select(repr.typeSymbol.typeMember("Label")).dealias match
+      case ConstantType(StringConstant(s)) => s
+      case _ => ""
+    val metaEntries = repr.select(repr.typeSymbol.typeMember("Metadata")).dealias.asType match
+      case '[type meta <: Tuple; meta] => TupleTraverse.traverseTuple(Type.of[meta])
       case _ => Nil
+    Param(label, tpe, metaEntries, metaEntries.exists(isAnnotation[mrpc.annotation.verbatim]))
 
+  /** Locates an annotation term of type `A` in the op's `Metadata`, like made's `getAnnotationImpl`. */
+  private def findAnnotation[A: Type](using q: Quotes)(opType: Type[?]): Option[q.reflect.Term] =
+    import q.reflect.*
+    metadataEntries(opType).iterator
+      .map(t => TypeRepr.of(using t))
+      .collectFirst:
+        case AnnotatedType(_, annot) if annot.tpe <:< TypeRepr.of[A] => annot
+
+  private def isAnnotation[A: Type](entry: Type[?])(using Quotes): Boolean =
+    import quotes.reflect.*
+    TypeRepr.of(using entry) match
+      case AnnotatedType(_, annot) => annot.tpe <:< TypeRepr.of[A]
+      case _ => false
+
+  /** Extracts a constant `String` constructor argument named `field` from an annotation term. */
   private def extractStringArg(using q: Quotes)(annot: q.reflect.Term, field: String): Option[String] =
     import q.reflect.*
-    constructorArgs(annot).get(field).collect { case Literal(StringConstant(s)) => s }
+    constructorArgs(annot)
+      .get(field)
+      .collect:
+        case Literal(StringConstant(s)) => s
 
+  /** Extracts a constant `Boolean` constructor argument named `field` (default `false`). */
   private def extractBooleanArg(using q: Quotes)(annot: q.reflect.Term, field: String): Boolean =
     import q.reflect.*
     constructorArgs(annot).get(field) match
       case Some(Literal(BooleanConstant(b))) => b
       case _ => false
 
-  /** Maps an annotation's primary-constructor parameter names to applied argument terms. */
+  /**
+   * Maps an annotation's primary-constructor parameter names to the applied argument terms. Handles
+   * both positional args (zipped against the constructor parameter names in order) and `NamedArg`
+   * entries (keyed by their explicit name, overriding the positional mapping). The inner literal is
+   * unwrapped from any `NamedArg`.
+   */
   private def constructorArgs(using q: Quotes)(annot: q.reflect.Term): Map[String, q.reflect.Term] =
     import q.reflect.*
     val ctorParamNames = annot.tpe.typeSymbol.primaryConstructor.paramSymss.flatten
       .filterNot(_.isType)
       .map(_.name)
+
     def collectArgs(term: Term): List[Term] = term match
       case Apply(fun, args) => collectArgs(fun) ++ args
       case TypeApply(fun, _) => collectArgs(fun)
       case _ => Nil
+
     val args = collectArgs(annot)
-    val named = args.collect { case NamedArg(name, value) => name -> value }.toMap
-    val positional = ctorParamNames.zip(args).collect {
-      case (name, arg) =>
-        arg match
-          case _: NamedArg => None
-          case other => Some(name -> other)
-    }.flatten.toMap
+    val named: Map[String, Term] = args
+      .collect:
+        case NamedArg(name, value) => name -> value
+      .toMap
+    val positional: Map[String, Term] = ctorParamNames
+      .zip(args)
+      .collect:
+        case (name, arg) =>
+          arg match
+            case NamedArg(_, _) => None
+            case other => Some(name -> other)
+      .flatten
+      .toMap
     positional ++ named

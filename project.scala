@@ -1,6 +1,7 @@
 //> using scala 3.8.4
 
 // made + mcodec are resolved from a local publishLocal SNAPSHOT.
+//> using dep io.github.halotukozak::made:0.1.3-done-SNAPSHOT
 //> using dep io.github.halotukozak::mcodec:0.0.0-done-SNAPSHOT
 
 //> using test.dep org.scalameta::munit:1.3.3

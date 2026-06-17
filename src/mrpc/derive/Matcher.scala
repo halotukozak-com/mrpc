@@ -3,8 +3,10 @@ package mrpc.derive
 import scala.concurrent.Future
 import scala.quoted.*
 
+import made.Done
+
 /**
- * Pure compile-time classification of each trait operation into an [[OpPlan]]: arity (from the
+ * Pure compile-time classification of each `DoneOperation` into an [[OpPlan]]: arity (from the
  * output type), the resolved rpcName, and a per-parameter encode-vs-verbatim plan.
  *
  * This is deliberately a per-operation CLASSIFICATION, not an N×M raw/real matching search. mrpc's
@@ -17,8 +19,8 @@ import scala.quoted.*
  * generic-raw-method matcher would plug tag logic in.
  *
  * Widened to `private[mrpc]` because it is the shared introspection reused by BOTH the engine
- * (matching/dispatch) and metadata materialization — one symbol-reflection path, no fork. The
- * cross-package metadata suite also asserts the metadata rpcNames EQUAL [[describe]]'s.
+ * (matching/dispatch) and metadata materialization — one Done-walk path, no fork. The cross-package
+ * metadata suite also asserts the metadata rpcNames EQUAL [[describe]]'s.
  */
 private[mrpc] object Matcher:
 
@@ -30,7 +32,7 @@ private[mrpc] object Matcher:
   inline def describe[T]: List[OpDescriptor] = ${ describeImpl[T] }
 
   private def describeImpl[T: Type](using Quotes): Expr[List[OpDescriptor]] =
-    val plans = planAll[T]
+    val plans = planAll[T](summonDone[T])
     val descriptors = plans.map(descriptorExpr)
     Expr.ofList(descriptors)
 
@@ -65,46 +67,59 @@ private[mrpc] object Matcher:
     TypeRepr.of(using t).show
 
   /**
-   * Classifies every operation of `T` into an [[OpPlan]], delegating rpcName resolution (incl.
-   * overload disambiguation + duplicate detection) to [[RpcName.computeAll]]. Operations are read
-   * directly off `T`'s trait member symbols (commons-style) — no reflection mirror.
+   * Summons the `Done.Of[T]` mirror ONCE. Callers thread the result into [[planAll]] /
+   * [[operationTypes]] instead of re-summoning — the server path in particular needs the same mirror
+   * both for classification and for `Done.invoke`, so a single summon avoids deriving it twice.
    */
-  def planAll[T: Type](using Quotes): List[OpPlan] =
-    val members = OpReflect.operationMembers[T]
-    // Names are resolved across the whole op set so overloads disambiguate and duplicates are
-    // detected; the matcher then attaches arity + param plans to each resolved name.
-    val resolvedNames = RpcName.computeAll[T](members)
-    members.zip(resolvedNames).zipWithIndex.map { case ((member, name), index) =>
-      planOne[T](member, name, index)
+  def summonDone[T: Type](using Quotes): Expr[Done.Of[T]] =
+    import quotes.reflect.*
+    Expr.summon[Done.Of[T]].getOrElse {
+      report.errorAndAbort(s"could not summon a Done mirror for ${TypeRepr.of[T].show}")
     }
 
   /**
-   * Reuse surface for metadata materialization: the operation member symbols, in declaration order —
-   * the SAME members the matcher classifies, so metadata cannot drift from dispatch.
+   * Classifies every operation of `T` into an [[OpPlan]], delegating rpcName resolution (incl.
+   * overload disambiguation + duplicate detection) to [[RpcName.computeAll]]. The `Done` mirror is
+   * passed in (summoned once at the entry point via [[summonDone]]), not re-summoned here.
    */
-  private[mrpc] def operationMembersOf[T: Type](using Quotes): List[quotes.reflect.Symbol] =
-    OpReflect.operationMembers[T]
+  def planAll[T: Type](done: Expr[Done.Of[T]])(using Quotes): List[OpPlan] =
+    val ops = operationTypes(done)
+    // Names are resolved across the whole op set so overloads disambiguate and duplicates are
+    // detected; the matcher then attaches arity + param plans to each resolved name.
+    val resolvedNames = RpcName.computeAll(ops)
+    ops.zip(resolvedNames).zipWithIndex.map { case ((op, name), index) =>
+      planOne(op, name, index)
+    }
 
   /**
-   * Reuse surface: the arity TAG (`"fire"`|`"call"`|`"get"`) for an op member — the SAME classification
+   * Reuse surface: the arity TAG (`"fire"`|`"call"`|`"get"`) for an op type — the SAME classification
    * [[planOne]] applies via [[arityOf]], exposed for the metadata fold so there is no second classifier.
    */
-  private[mrpc] def arityTagOf[T: Type](using Quotes)(member: quotes.reflect.Symbol): String =
-    arityOf(OpReflect.outputType[T](member)) match
+  private[mrpc] def arityTagOf(opType: Type[?])(using Quotes): String =
+    arityOf(OpReflect.outputType(opType)) match
       case Arity.Fire => "fire"
       case Arity.Call(_) => "call"
       case Arity.Get(_) => "get"
 
-  /** Classifies a single operation member into an [[OpPlan]] using its already-resolved rpcName. */
-  private def planOne[T: Type](using Quotes)(member: quotes.reflect.Symbol, rpcName: String, index: Int): OpPlan =
-    val label = OpReflect.labelOf(member)
-    val arity = arityOf(OpReflect.outputType[T](member))
-    val params = OpReflect.params[T](member).map(planParam)
+  /** Extracts the refined `DoneOperation` element types from the (passed-in) mirror's `Operations`. */
+  private[mrpc] def operationTypes[T: Type](doneExpr: Expr[Done.Of[T]])(using Quotes): List[Type[?]] =
+    import quotes.reflect.*
+    val doneTpe = doneExpr.asTerm.tpe.widen
+    val operationsTpe = doneTpe.select(doneTpe.typeSymbol.typeMember("Operations")).dealias
+    operationsTpe.asType match
+      case '[type ops <: Tuple; ops] => TupleTraverse.traverseTuple(Type.of[ops])
+      case _ => report.errorAndAbort("Done.Operations is not a tuple")
+
+  /** Classifies a single operation type into an [[OpPlan]] using its already-resolved rpcName. */
+  private def planOne(opType: Type[?], rpcName: String, index: Int)(using Quotes): OpPlan =
+    val label = OpReflect.labelOf(opType)
+    val arity = arityOf(OpReflect.outputType(opType))
+    val params = OpReflect.inputElems(opType).map(planParam)
     // Under the fixed-RawRpc model the result is always encoded via the summoned leaf bridge unless
     // it is itself Raw; @verbatim on a non-Raw result has no identity to land on. Result-verbatim is
     // therefore only reachable through the same Raw-type check params use; v1 fixtures encode results.
     val resultEncoding = Encoding.Encoded
-    OpPlan(label, rpcName, arity, params, resultEncoding, index)
+    OpPlan(label, rpcName, arity, params, resultEncoding, opType, index)
 
   /**
    * Arity from the output type. `Unit` -> fire; `Future[X]` -> call carrying `X`; anything else is
