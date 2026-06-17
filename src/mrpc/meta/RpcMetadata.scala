@@ -3,15 +3,13 @@ package mrpc.meta
 import scala.annotation.Annotation
 import scala.compiletime.summonInline
 
-import made.annotation.MetaAnnotation
-
-import mrpc.annotation.{rpcMethodMetadata, rpcParamMetadata}
+import mrpc.annotation.{MetaAnnotation, rpcMethodMetadata, rpcParamMetadata}
 
 /**
  * Shared runtime annotation-query helpers. The accessors are `inline` so each call site summons the
  * class evidence for the concrete annotation type, making the runtime filter checkable without a cast.
  * The class-evidence type is referenced fully-qualified to keep the import list free of any
- * macro-reflection vocabulary in this Done-first value layer.
+ * macro-reflection vocabulary in this value layer.
  */
 private object AnnotationQuery:
   inline def find[A <: MetaAnnotation](annotations: List[Annotation]): Option[A] =
@@ -19,7 +17,8 @@ private object AnnotationQuery:
     annotations.collectFirst { case tag(a) => a }
 
 /**
- * Materialized, runtime description of a real RPC trait's API surface, derived from `made.Done`.
+ * Materialized, runtime description of a real RPC trait's API surface, derived by direct compile-time
+ * reflection on the trait (no external mirror).
  * Structural v1: name + operations + per-op params + annotation accessors. NOT the commons
  * TypedMetadata DSL (deferred to v2).
  *

@@ -3,8 +3,6 @@ package mrpc.derive
 import scala.concurrent.{ExecutionContext, Future}
 import scala.quoted.*
 
-import made.Done
-
 import mrpc.conv.{AsRaw, AsReal}
 import mrpc.raw.{RawInvocation, RawRpc}
 
@@ -12,11 +10,12 @@ import mrpc.raw.{RawInvocation, RawRpc}
  * Server-adapter derivation: builds an `AsRaw[RawRpc[Raw], Real]` that turns a real trait instance
  * into a transport-facing [[RawRpc]]. The generated `RawRpc[Raw]` dispatches each incoming
  * [[RawInvocation]] by `rpcName`, decodes every argument to its EXACT declared parameter type via a
- * summoned `AsReal[Raw, paramType]`, calls `made.Done.invoke`, and encodes the result back to `Raw`.
+ * summoned `AsReal[Raw, paramType]`, calls the real method DIRECTLY (`api.<member>(args)`, commons-
+ * style — no reflection mirror), and encodes the result back to `Raw`.
  *
- * Decoding to the exact `InputElem.Type` before tupling is what makes made's internal unboxing cast
- * (in `DoneOperation.apply`) a provable no-op: the value handed to the tuple is already statically
- * the declared type, so no boxing/unboxing mismatch can crash even on primitives or wrapper types.
+ * Decoding to the exact declared parameter type before the call means the generated `api.method(...)`
+ * type-checks against the member's own signature, so no boxing/unboxing mismatch can crash even on
+ * primitives or wrapper types.
  *
  * The `match` arms are PARTITIONED BY ARITY — only `fire`-arity ops appear in `fire`, only
  * `call`-arity in `call`, only `get`-arity in `get`. An `rpcName` outside an arity's known set falls
@@ -41,23 +40,16 @@ object AsRawDerivation:
 
     val plans = Matcher.planAll[Real]
 
-    // Summon the Done mirror; each arm selects its operation off it and dispatches via `Done.invoke`.
-    val doneExpr = Expr.summon[Done.Of[Real]].getOrElse {
-      report.errorAndAbort(s"could not summon a Done mirror for ${TypeRepr.of[Real].show}")
-    }
-
     '{
       new AsRaw[RawRpc[Raw], Real]:
         def asRaw(api: Real): RawRpc[Raw] =
-          // Bind the mirror once — do not re-derive per call (a known derivation-perf pitfall).
-          val done: Done.Of[Real] = $doneExpr
           new RawRpc[Raw]:
             def fire(invocation: RawInvocation[Raw]): Unit =
-              ${ fireBody[Raw, Real]('api, 'invocation, plans, 'done) }
+              ${ fireBody[Raw, Real]('api, 'invocation, plans) }
             def call(invocation: RawInvocation[Raw]): Future[Raw] =
-              ${ callBody[Raw, Real]('api, 'invocation, plans, ecExpr, 'done) }
+              ${ callBody[Raw, Real]('api, 'invocation, plans, ecExpr) }
             def get(invocation: RawInvocation[Raw]): RawRpc[Raw] =
-              ${ getBody[Raw, Real]('api, 'invocation, plans, 'done) }
+              ${ getBody[Raw, Real]('api, 'invocation, plans) }
     }
 
   // --- arity-partitioned dispatch bodies ---
@@ -66,7 +58,6 @@ object AsRawDerivation:
     api: Expr[Real],
     inv: Expr[RawInvocation[Raw]],
     plans: List[OpPlan],
-    done: Expr[Done.Of[Real]],
   )(using Quotes,
   ): Expr[Unit] =
     val arms = plans.filter(p =>
@@ -75,7 +66,7 @@ object AsRawDerivation:
         case _ => false,
     )
     matchOnName[Raw, Unit](inv, arms, '{ () }) { plan =>
-      val invokeTerm = invokeOp[Raw, Real](api, inv, plan, done)
+      val invokeTerm = invokeOp[Raw, Real](api, inv, plan)
       // Fire ops return Unit; invoking for its side effect is the whole job.
       '{ ${ invokeTerm.asExprOf[Any] }; () }
     }
@@ -85,7 +76,6 @@ object AsRawDerivation:
     inv: Expr[RawInvocation[Raw]],
     plans: List[OpPlan],
     ec: Expr[ExecutionContext],
-    done: Expr[Done.Of[Real]],
   )(using Quotes,
   ): Expr[Future[Raw]] =
     import quotes.reflect.*
@@ -104,7 +94,7 @@ object AsRawDerivation:
         case Arity.Call(resultType) =>
           resultType match
             case '[r] =>
-              val resultExpr = invokeOp[Raw, Real](api, inv, plan, done).asExprOf[Future[r]]
+              val resultExpr = invokeOp[Raw, Real](api, inv, plan).asExprOf[Future[r]]
               // Compose the leaf result encoder over Future via `forFuture`, threading the
               // companion-supplied ExecutionContext — never a global one.
               val encoder = Expr
@@ -126,7 +116,6 @@ object AsRawDerivation:
     api: Expr[Real],
     inv: Expr[RawInvocation[Raw]],
     plans: List[OpPlan],
-    done: Expr[Done.Of[Real]],
   )(using Quotes,
   ): Expr[RawRpc[Raw]] =
     import quotes.reflect.*
@@ -161,7 +150,7 @@ object AsRawDerivation:
                   ),
                 )
               // Read the real sub-RPC instance off the api (a no-arg getter) and adapt it.
-              val subInstance = invokeOp[Raw, Real](api, inv, plan, done).asExprOf[sub]
+              val subInstance = invokeOp[Raw, Real](api, inv, plan).asExprOf[sub]
               '{ AsRaw.makeLazy[RawRpc[Raw], sub]($subAdapter).asRaw($subInstance) }
         case _ => reject
     }
@@ -190,28 +179,27 @@ object AsRawDerivation:
     Match(scrutinee, caseDefs :+ default).asExprOf[Res]
 
   /**
-   * Decodes the invocation's flat arguments to the operation's exact `InputElem.Type`s, assembles
-   * `op.Args`, and emits `Done.invoke(done, op, api, args)`. The returned term is statically typed as
-   * the operation's `OutputType`; callers ascribe it for their arity.
-   *
-   * `inv.args` is nested per parameter list (`List[List[Raw]]`); it is flattened in `InputElems`
-   * order before decoding, matching made's flattened `Args` contract.
+   * Decodes the invocation's flat arguments to the operation's exact declared parameter types and
+   * emits a DIRECT call to the real member — `api.<member>(args...)` — re-nested into the member's own
+   * parameter lists (commons-style; no reflection mirror, no runtime invoke). The returned term is
+   * statically the member's result type; callers ascribe it for their arity. `inv.args` is nested per
+   * parameter list (`List[List[Raw]]`) and flattened here before decoding.
    */
   private def invokeOp[Raw: Type, Real: Type](
     api: Expr[Real],
     inv: Expr[RawInvocation[Raw]],
     plan: OpPlan,
-    done: Expr[Done.Of[Real]],
   )(using q: Quotes,
   ): q.reflect.Term =
     import q.reflect.*
 
-    val opTerm = selectOperation[Real](done, plan)
+    // Recover the exact trait member this plan describes — same enumeration + order as the matcher.
+    val member = OpReflect.operationMembers[Real](plan.index)
 
     val flatArgs = '{ ${ inv }.args.flatten }
 
-    // Decode each param to its EXACT declared type via a summoned AsReal[Raw, paramType]; the tuple
-    // element is then statically that type, so made's internal unboxing cast is a provable no-op.
+    // Decode each param to its EXACT declared type via a summoned AsReal[Raw, paramType]; the term is
+    // then statically that type, so the generated `api.method(...)` type-checks against the signature.
     val decodedArgs: List[Term] = plan.params.zipWithIndex.map { case (param, i) =>
       param.paramType match
         case '[t] =>
@@ -225,62 +213,21 @@ object AsRawDerivation:
           '{ $decoder.asReal($flatArgs(${ Expr(i) })) }.asTerm
     }
 
-    val argsTuple = buildArgsTuple(decodedArgs, opTerm)
+    // Re-nest the flat decoded args into the member's own parameter lists, then call directly:
+    //   no-parens `def f`      -> `api.f`        (sizes Nil)
+    //   empty-parens `def f()` -> `api.f()`      (sizes List(0))
+    //   `def f(a)(b, c)`       -> `api.f(a)(b,c)` (sizes List(1, 2))
+    val sizes = OpReflect.paramListSizes(member)
+    val argss = splitBySizes(decodedArgs, sizes)
+    val sel = Select(api.asTerm, member) // select by Symbol (overload-safe), not by name
+    if argss.isEmpty then sel else sel.appliedToArgss(argss)
 
-    // Done.invoke(done, op, api, args) — the type-safe extension (`Done.invoke[Real](done)(op, api,
-    // args)`). op carries OuterType = Real and Args = the exact tuple we built, both checked against
-    // `opTerm`'s refined type here. `invoke` is a top-level extension method on the `Done` companion.
-    val invokeRef = TypeApply(
-      Select.unique(Ref(TypeRepr.of[Done.type].termSymbol), "invoke"),
-      List(TypeTree.of[Real]),
-    )
-    Apply(
-      Apply(invokeRef, List(done.asTerm)),
-      List(opTerm, api.asTerm, argsTuple),
-    )
-
-  /**
-   * Selects `done.operations` element `index` and recovers its precise refined operation type so that
-   * `op.Args`/`op.OutputType`/`op.OuterType` resolve for the type-safe `Done.invoke` call. See the
-   * inline note on the single, mirror-justified narrowing this performs.
-   */
-  private def selectOperation[Real: Type](
-    done: Expr[Done.Of[Real]],
-    plan: OpPlan,
-  )(using q: Quotes,
-  ): q.reflect.Term =
-    import q.reflect.*
-    // Pull operation `index` off the runtime `operations` tuple and recover its precise refined type
-    // so `op.Args`/`op.OutputType` resolve for the type-safe `Done.invoke`. `productElement` is typed
-    // `Any` (made's `Operations` is a transparent-given refinement the compiler keeps bound, so neither
-    // `.head`/`.tail` reduction nor a checked ascription is available here). The narrowing to
-    // `plan.opType` is the SINGLE narrowing in the adapter and is provably sound: the matcher derived
-    // `plan.opType` from THIS SAME mirror, so the runtime element IS exactly that operation type. It is
-    // generated via the runtime cast method (referenced by name, not via the source token) precisely so
-    // this safe, mirror-justified narrowing is not confused with an unsafe value cast.
-    val castMethod = "as" + "InstanceOf"
-    val element = Select
-      .unique('{ ${ done }.operations }.asTerm, "productElement")
-      .appliedTo(Literal(IntConstant(plan.index)))
-    plan.opType match
-      case '[op] => TypeApply(Select.unique(element, castMethod), List(TypeTree.of[op]))
-
-  /**
-   * Assembles the decoded argument terms into the operation's exact `Args` tuple. Empty arg lists
-   * become `EmptyTuple`; otherwise a `TupleN` is built and ascribed (a type check, NOT a cast) to the
-   * op term's path-dependent `Args`. The ascription holds because each element was decoded to its
-   * exact `InputElem.Type`, so the tuple already conforms to `Tuple.Map[InputElems, ExtractOf]`.
-   */
-  private def buildArgsTuple(
-    using q: Quotes,
-  )(
-    decodedArgs: List[q.reflect.Term],
-    opTerm: q.reflect.Term,
-  ): q.reflect.Term =
-    import q.reflect.*
-    // `op.Args` is path-dependent on the op term, so read it as a TermRef-rooted member type.
-    val argsType = opTerm.tpe.select(opTerm.tpe.widen.typeSymbol.typeMember("Args")).dealias
-    val tupleTerm =
-      if decodedArgs.isEmpty then '{ EmptyTuple }.asTerm
-      else Expr.ofTupleFromSeq(decodedArgs.map(_.asExpr)).asTerm
-    Typed(tupleTerm, TypeTree.of(using argsType.asType))
+  /** Splits `items` into consecutive groups of the given `sizes` (the inverse of `flatten`). */
+  private def splitBySizes[A](items: List[A], sizes: List[Int]): List[List[A]] =
+    sizes
+      .foldLeft((items, List.empty[List[A]])) { case ((remaining, acc), n) =>
+        val (group, rest) = remaining.splitAt(n)
+        (rest, group :: acc)
+      }
+      ._2
+      .reverse

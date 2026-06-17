@@ -1,6 +1,5 @@
 package mrpc.annotation
 
-import made.annotation.MetaAnnotation
 
 /** Base for all RPC tag annotations. Mirrors commons `RpcTag`; the commons base-trait hierarchy is otherwise dropped. */
 trait RpcTag extends MetaAnnotation

@@ -12,6 +12,14 @@ object AsReal:
 
   given identity[A]: AsReal[A, A] = (a: A) => a
 
+  /**
+   * Auto-derived client proxy for any RPC trait opted in via `derives RpcCodec` (commons-style — no
+   * manual `materializeAsReal`). Gated on the [[RpcCodec]] marker so it never fires for non-RPC types;
+   * polymorphic in the transport `Raw` and `inline` so leaf codecs resolve at the concrete summon site.
+   */
+  inline given derivedRpc[Raw, Real](using RpcCodec[Real]): AsReal[mrpc.raw.RawRpc[Raw], Real] =
+    ${ mrpc.derive.AsRealDerivation.impl[Raw, Real] }
+
   // Typeclass instance OVER Try (not a Try-returning public method) — required for commons parity.
   given forTry[Raw, Real](using inner: AsReal[Raw, Real]): AsReal[Try[Raw], Try[Real]] =
     _.map(inner.asReal)
