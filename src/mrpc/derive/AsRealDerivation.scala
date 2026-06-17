@@ -246,9 +246,9 @@ object AsRealDerivation:
   /** Splits `items` into consecutive groups of the given `sizes` (the inverse of `flatten`). */
   private def splitBySizes[A](items: List[A], sizes: List[Int]): List[List[A]] =
     sizes
-      .foldLeft((items, List.empty[List[A]])) { case ((remaining, acc), n) =>
+      .foldLeft((remaining = items, acc = List.empty[List[A]])) { case ((remaining, acc), n) =>
         val (group, rest) = remaining.splitAt(n)
         (rest, group :: acc)
       }
-      ._2
+      .acc
       .reverse

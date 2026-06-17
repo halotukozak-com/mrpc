@@ -23,13 +23,3 @@ package mrpc.meta
 trait RpcMetadataCompanion[M[_]]:
   inline def materialize[Real]: M[Real] =
     ${ mrpc.derive.MetadataDerivation.impl[M, Real] }
-
-/**
- * The v1 flat-`RpcMetadata` entry point, retained so the v1 `MetadataSuite`/`MetadataStrategySuite`
- * keep COMPILING until Plan 03 migrates them to the new `TypedMetadata` DSL. The v1 macro
- * (`MetadataDerivationV1.impl`) is unchanged; only the canonical `RpcMetadataCompanion` name was
- * generalized to the metadata-class-parameterized form above.
- */
-trait RpcMetadataCompanionV1:
-  inline def materializeMetadata[Real]: RpcMetadata[Real] =
-    ${ mrpc.derive.MetadataDerivationV1.impl[Real] }

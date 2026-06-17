@@ -5,32 +5,34 @@ import scala.quoted.*
 /**
  * The metadata-class-param-driven `materialize` macro — the heart of Phase 10.
  *
- * Unlike the v1 [[MetadataDerivationV1]] (a blind `Done`-walk emitting a fixed flat shape), this macro
+ * Unlike a blind `Done`-walk emitting a fixed flat shape, this macro
  * is driven by the METADATA CLASS `M`'s primary-constructor params: it reads each param's steering
  * annotation, classifies it, and fills it from the real trait's `made.Done` structure plus the engine's
  * shared introspection. The emitted value is `new M[Real](<filled params>)`.
  *
- * Steering vocabulary honored here (Plan 02 slice):
+ * Steering vocabulary honored:
+ *   - `@composite`                     -> recurse `buildValue` over the param type's primary ctor against
+ *                                         the SAME real-symbol context (NameInfo flattening; Pitfall 3).
  *   - `@reifyName`                     -> the made `label` (source name) of the current op/param.
  *   - `@reifyName(useRawName = true)`  -> the RESOLVED rpcName ([[RpcName.computeAll]]) — == the engine's.
- *   - `@reifyAnnot` (single)           -> the real annotation instance, read via the made `getAnnotation`
- *                                         idiom (`collectFirst` over `AnnotatedType(_, annot)` where
- *                                         `annot.tpe <:< A`). Slot type `Option[A]` -> `Option`; `A` -> the
- *                                         instance (aborts if absent). `@multi`/`@optional` arity is a Plan-03
- *                                         concern; only `single`/`Option` is wired now.
- *   - `@infer`                         -> `Expr.summon[paramType]`; aborts with the `@infer` clue if absent.
- *   - `@rpcMethodMetadata @multi`      -> one element per op (over [[Matcher.operationTypes]]), each built by
- *                                         recursing this routine in a per-op context; collected into a `List`.
- *   - `@rpcParamMetadata @multi`       -> one element per [[OpReflect.inputElems]] (declaration order), each
- *                                         built in a per-param context; collected into a `List`.
+ *   - `@reifyAnnot` (arity-shaped)     -> the real annotation instance(s), read via the made `getAnnotation`
+ *                                         idiom. `@single`/`A` -> the instance (aborts if absent);
+ *                                         `@optional`/`Option[A]` -> `Option`; `@multi`/`List[A]` -> ALL
+ *                                         matching annotations on the symbol (the mrpc-owned collect-all walk).
+ *   - `@infer`                         -> `Implicits.search[paramType]`; aborts with the `@infer` clue if absent.
+ *   - `@rpcMethodMetadata` (arity)     -> projects over [[Matcher.operationTypes]]: `@multi` -> `List`/
+ *                                         `Map[String, _]` (keyed by rpcName); `@optional` -> `Option`;
+ *                                         `@single` -> exactly one (compile error on 0/>1).
+ *   - `@rpcParamMetadata` (arity)      -> projects over [[OpReflect.inputElems]] (declaration order), same
+ *                                         arity shaping; `Map` slots keyed by paramName.
  *
  * No-fork guarantee: resolved rpcNames come from [[RpcName.computeAll]] and arity from
  * [[Matcher.arityTagOf]] — the SAME engine introspection the matcher/dispatcher use. The metadata cannot
  * drift from what the engine dispatches.
  *
- * Pitfall-3 groundwork: the per-element build threads a [[Context]] (the current op / param `Type`), so
- * nested method/param metadata read the RIGHT symbol. Full `@composite` (recurse against the SAME context)
- * lands in Plan 03.
+ * Pitfall-3 (`@composite`): the per-element build threads a [[Context]] (the current op / param `Type`),
+ * and `@composite` recurses with the SAME `Context` so the nested class's `@reifyName` reads the real
+ * symbol, not its own field names.
  */
 private[mrpc] object MetadataDerivation:
 

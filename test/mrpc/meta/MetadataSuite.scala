@@ -1,25 +1,54 @@
 package mrpc.meta
 
-import mrpc.annotation.rpcName
+import mrpc.annotation.{multi, reifyAnnot, reifyName, rpcMethodMetadata, rpcParamMetadata}
 import mrpc.derive.SampleApi.*
 
-// RED until the metadata materializer lands; see phase plan 02/03.
+// Per-param metadata for the migrated v1 suite: source name + the optional @multi annotation a param
+// may carry (SampleApi.increment's `n` is @multi).
+final case class ParamInfo[T](
+  @reifyName name: String,
+  @reifyAnnot multiAnnot: Option[mrpc.annotation.multi],
+) extends TypedMetadata[T]
+
+// Per-method metadata: source label, resolved rpcName, the optional @rpcName instance, and the
+// per-param projection in declaration order.
+final case class MethodInfo[T](
+  @reifyName label: String,
+  @reifyName(useRawName = true) rpcName: String,
+  @reifyAnnot rpcNameAnnot: Option[mrpc.annotation.rpcName],
+  @rpcParamMetadata @multi params: List[ParamInfo[?]],
+) extends TypedMetadata[T]
+
+// Trait-level metadata: one MethodInfo per RPC method.
+final case class ApiInfo[T](
+  @rpcMethodMetadata @multi methods: List[MethodInfo[?]],
+)
+object ApiInfo extends RpcMetadataCompanion[ApiInfo]
+
+/**
+ * The migrated v1 `MetadataSuite`, rewritten onto the TypedMetadata DSL (the v1 flat `RpcMetadata`
+ * surface is retired). Re-asserts the v1 behaviors against the new shape — every op listed, params in
+ * declaration order, resolved rpcName, per-method/per-param annotation — and PRESERVES the no-fork
+ * invariant: the metadata rpcNames EQUAL the engine's (`Matcher.describe`). Arity is asserted against
+ * the engine projection (arity is engine-derived; the DSL has no arity slot — there is one classifier).
+ */
 class MetadataSuite extends munit.FunSuite:
-  object MetaFixture extends RpcMetadataCompanionV1
 
-  private lazy val md: RpcMetadata[SampleApi] = MetaFixture.materializeMetadata[SampleApi]
-  private def op(label: String): OperationMetadata = md.operations.find(_.label == label).get
+  private lazy val md: ApiInfo[SampleApi] = ApiInfo.materialize[SampleApi]
+  private def op(label: String): MethodInfo[?] = md.methods.find(_.label == label).get
 
-  test("operations lists every op of the trait"):
+  test("methods lists every op of the trait"):
     assertEquals(
-      md.operations.map(_.label).toSet,
+      md.methods.map(_.label).toSet,
       Set("ping", "increment", "find", "users", "lookup", "combine", "echoBool", "findRenamed"),
     )
 
-  test("arity tag is fire/call/get per output type"):
-    assertEquals(op("ping").arity, "fire")
-    assertEquals(op("increment").arity, "call")
-    assertEquals(op("users").arity, "get")
+  test("arity tag is fire/call/get per output type (engine-derived, no fork)"):
+    val arityByLabel: Map[String, List[String]] =
+      mrpc.derive.Matcher.describe[SampleApi].groupMap(_.label)(_.arity)
+    assertEquals(arityByLabel("ping"), List("fire"))
+    assertEquals(arityByLabel("increment"), List("call"))
+    assertEquals(arityByLabel("users"), List("get"))
 
   test("params are listed in declaration order, flattened across param lists"):
     assertEquals(op("combine").params.map(_.name), List("a", "b", "c"))
@@ -27,18 +56,23 @@ class MetadataSuite extends munit.FunSuite:
     assertEquals(op("increment").params.map(_.name), List("n"))
 
   test("method-level annotation is exposed (resolved rpcName + @rpcName readable)"):
-    assertEquals(op("findRenamed").name, "findOne")
-    assert(op("findRenamed").hasAnnotation[rpcName])
+    assertEquals(op("findRenamed").rpcName, "findOne")
+    assertEquals(op("findRenamed").rpcNameAnnot.map(_.name), Some("findOne"))
+    // a non-renamed method has no @rpcName instance and its source == resolved name
+    assertEquals(op("ping").rpcNameAnnot, None)
+    assertEquals(op("ping").rpcName, "ping")
 
   test("per-param annotation is exposed on the param's metadata"):
     val nParam = op("increment").params.find(_.name == "n").get
-    assert(nParam.hasAnnotation[mrpc.annotation.multi])
+    assert(nParam.multiAnnot.isDefined)
+    // a param WITHOUT @multi reifies None
+    val idParam = op("find").params.find(_.name == "id").get
+    assertEquals(idParam.multiAnnot, None)
 
   test("resolved rpcNames EQUAL the engine's (shared Done path, no fork)"):
-    // The engine's resolved names come from Matcher.describe[SampleApi] (package mrpc.derive). Plan 02
-    // widens Matcher to private[mrpc] so this cross-package assertion compiles.
+    // The engine's resolved names come from Matcher.describe[SampleApi]; the metadata must not fork.
     val engineByLabel: Map[String, List[String]] =
       mrpc.derive.Matcher.describe[SampleApi].groupMap(_.label)(_.rpcName)
     val metaByLabel: Map[String, List[String]] =
-      md.operations.groupMap(_.label)(_.name)
+      md.methods.groupMap(_.label)(_.rpcName)
     assertEquals(metaByLabel, engineByLabel)
