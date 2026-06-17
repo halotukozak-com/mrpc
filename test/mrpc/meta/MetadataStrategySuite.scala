@@ -4,7 +4,7 @@ import mrpc.derive.SampleApi.*
 
 // RED until strategy-marker honoring lands; see phase plan 03.
 class MetadataStrategySuite extends munit.FunSuite:
-  object MetaFixture extends RpcMetadataCompanion
+  object MetaFixture extends RpcMetadataCompanionV1
 
   private lazy val md: RpcMetadata[SampleApi] = MetaFixture.materializeMetadata[SampleApi]
 

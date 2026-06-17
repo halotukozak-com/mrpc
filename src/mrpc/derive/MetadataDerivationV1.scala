@@ -26,7 +26,7 @@ import mrpc.meta.{OperationMetadata, ParamMetadata, RpcMetadata}
  * steering of which slot collects what (the full strategy DSL is deferred). The split is fixed by the
  * value-type shape; recognition lives in `RpcMetadata.recognizedStrategies`.
  */
-private[mrpc] object MetadataDerivation:
+private[mrpc] object MetadataDerivationV1:
 
   def impl[Real: Type](using Quotes): Expr[RpcMetadata[Real]] =
     import quotes.reflect.*

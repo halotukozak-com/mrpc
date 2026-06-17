@@ -5,7 +5,7 @@ import mrpc.derive.SampleApi.*
 
 // RED until the metadata materializer lands; see phase plan 02/03.
 class MetadataSuite extends munit.FunSuite:
-  object MetaFixture extends RpcMetadataCompanion
+  object MetaFixture extends RpcMetadataCompanionV1
 
   private lazy val md: RpcMetadata[SampleApi] = MetaFixture.materializeMetadata[SampleApi]
   private def op(label: String): OperationMetadata = md.operations.find(_.label == label).get
