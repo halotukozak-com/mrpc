@@ -163,18 +163,10 @@ object AsRealDerivation:
       case Arity.Get(subRpcType) =>
         subRpcType match
           case '[sub] =>
-            // RECURSION SEAM (lazily recursive): single summon site for the sub-RPC's client proxy,
-            // consumed through `AsReal.makeLazy` so self-/mutually-referential sub-RPCs reach a fixed
-            // point with one real proxy per type. Keep it a SINGLE summon site.
-            val subProxy = Expr
-              .summon[AsReal[RawRpc[Raw], sub]]
-              .getOrElse(
-                report.errorAndAbort(
-                  s"unsupported result type / no sub-RPC conversion AsReal[RawRpc[Raw], " +
-                    s"${TypeRepr.of[sub].show}] for '${plan.rpcName}'",
-                ),
-              )
-            '{ AsReal.makeLazy[RawRpc[Raw], sub]($subProxy).asReal($raw.get($invocation)) }
+            '{
+              val subProxy = compiletime.summonInline[AsReal[RawRpc[Raw], sub]]
+              AsReal.makeLazy[RawRpc[Raw], sub](subProxy).asReal($raw.get($invocation))
+            }
 
   /**
    * Builds `RawInvocation(<rpcName>, <nested encoded args>)`. Each argument is encoded to `Raw` via a
@@ -190,9 +182,6 @@ object AsRealDerivation:
     val encodedArgs: List[Expr[Raw]] = plan.params.zip(flatArgTerms).map { case (param, argTerm) =>
       param.paramType match
         case '[t] =>
-          // The per-param encoder is resolved in the GENERATED code via `summonInline` rather than at
-          // macro-expansion time via `Expr.summon`; a missing `AsRaw[Raw, t]` is reported by
-          // `summonInline` itself. This drops the explicit summon + manual `Select.unique` term build.
           '{ scala.compiletime.summonInline[AsRaw[Raw, t]].asRaw(${ argTerm.asExprOf[t] }) }
     }
 

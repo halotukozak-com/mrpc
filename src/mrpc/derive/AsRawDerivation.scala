@@ -104,7 +104,6 @@ object AsRawDerivation:
     done: Expr[Done.Of[Real]],
   )(using Quotes,
   ): Expr[RawRpc[Raw]] =
-    import quotes.reflect.*
     val reject = '{
       throw new IllegalArgumentException(
         "unknown rpc name for get: " + ${ inv }.rpcName,
@@ -120,24 +119,12 @@ object AsRawDerivation:
         case Arity.Get(subRpcType) =>
           subRpcType match
             case '[sub] =>
-              // RECURSION SEAM (lazily recursive): the sub-RPC's server adapter is summoned at this
-              // SINGLE site, then consumed through `AsRaw.makeLazy` so the recursive instance is forced
-              // lazily (at first runtime `get`), NOT during macro expansion. A self- or mutually-
-              // referential sub-RPC binds its adapter as a `lazy val given = makeLazy(...)`; the eager
-              // summon here resolves to that already-declared lazy given instead of re-entering
-              // `materialize*[Sub]`, so derivation reaches a fixed point with one real adapter per type.
-              // Non-recursive sub-RPCs are unaffected. Keep it a SINGLE summon site.
-              val subAdapter = Expr
-                .summon[AsRaw[RawRpc[Raw], sub]]
-                .getOrElse(
-                  report.errorAndAbort(
-                    s"unsupported result type / no sub-RPC conversion AsRaw[RawRpc[Raw], " +
-                      s"${TypeRepr.of[sub].show}] for '${plan.rpcName}'",
-                  ),
-                )
-              // Read the real sub-RPC instance off the api (a no-arg getter) and adapt it.
               val subInstance = invokeOp[Raw, Real](api, inv, plan, done).asExprOf[sub]
-              '{ AsRaw.makeLazy[RawRpc[Raw], sub]($subAdapter).asRaw($subInstance) }
+              '{
+                AsRaw
+                  .makeLazy[RawRpc[Raw], sub](compiletime.summonInline[AsRaw[RawRpc[Raw], sub]])
+                  .asRaw($subInstance)
+              }
         case _ => reject
     }
 
@@ -190,12 +177,13 @@ object AsRawDerivation:
     val decodedArgs: List[Term] = plan.params.zipWithIndex.map { case (param, i) =>
       param.paramType match
         case '[t] =>
-          // Decode each arg to its exact declared type via a `summonInline`d `AsReal[Raw, t]` in the
-          // generated code (which reports a missing instance itself).
           '{ scala.compiletime.summonInline[AsReal[Raw, t]].asReal($flatArgs(${ Expr(i) })) }.asTerm
     }
 
-    val argsTuple = buildArgsTuple(decodedArgs, opTerm)
+    // The decoded args are each statically their exact `InputElem.Type`, so the tuple already conforms
+    // to the op's `Args` (= `Tuple.Map[InputElems, ExtractOf]`) at the `Done.invoke` call below — no
+    // explicit ascription to the path-dependent `op.Args` is needed.
+    val argsTuple = Expr.ofTupleFromSeq(decodedArgs.map(_.asExpr)).asTerm
 
     // Done.invoke(done, op, api, args) — the type-safe extension (`Done.invoke[Real](done)(op, api,
     // args)`). op carries OuterType = Real and Args = the exact tuple we built, both checked against
@@ -235,22 +223,3 @@ object AsRawDerivation:
     plan.opType match
       case '[op] => TypeApply(Select.unique(element, castMethod), List(TypeTree.of[op]))
 
-  /**
-   * Assembles the decoded argument terms into the operation's exact `Args` tuple. Empty arg lists
-   * become `EmptyTuple`; otherwise a `TupleN` is built and ascribed (a type check, NOT a cast) to the
-   * op term's path-dependent `Args`. The ascription holds because each element was decoded to its
-   * exact `InputElem.Type`, so the tuple already conforms to `Tuple.Map[InputElems, ExtractOf]`.
-   */
-  private def buildArgsTuple(
-    using q: Quotes,
-  )(
-    decodedArgs: List[q.reflect.Term],
-    opTerm: q.reflect.Term,
-  ): q.reflect.Term =
-    import q.reflect.*
-    // `op.Args` is path-dependent on the op term, so read it as a TermRef-rooted member type.
-    val argsType = opTerm.tpe.select(opTerm.tpe.widen.typeSymbol.typeMember("Args")).dealias
-    val tupleTerm =
-      if decodedArgs.isEmpty then '{ EmptyTuple }.asTerm
-      else Expr.ofTupleFromSeq(decodedArgs.map(_.asExpr)).asTerm
-    Typed(tupleTerm, TypeTree.of(using argsType.asType))
