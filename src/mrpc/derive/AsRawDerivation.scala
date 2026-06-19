@@ -70,7 +70,6 @@ object AsRawDerivation:
     done: Expr[Done.Of[Real]],
   )(using Quotes,
   ): Expr[Future[Raw]] =
-    import quotes.reflect.*
     val reject = '{
       throw new IllegalArgumentException(
         "unknown rpc name for call: " + ${ inv }.rpcName,
@@ -88,17 +87,11 @@ object AsRawDerivation:
             case '[r] =>
               val resultExpr = invokeOp[Raw, Real](api, inv, plan, done).asExprOf[Future[r]]
               // Compose the leaf result encoder over Future via `forFuture`, threading the
-              // companion-supplied ExecutionContext — never a global one.
-              val encoder = Expr
-                .summon[AsRaw[Raw, r]]
-                .getOrElse(
-                  report.errorAndAbort(
-                    s"no AsRaw[Raw, ${TypeRepr.of[r].show}] to encode the result of '${plan.rpcName}'",
-                  ),
-                )
+              // companion-supplied ExecutionContext — never a global one. The encoder is resolved in
+              // the generated code via `summonInline` (which reports a missing `AsRaw[Raw, r]` itself).
               '{
                 val futureEncoder: AsRaw[Future[Raw], Future[r]] =
-                  AsRaw.forFuture[Raw, r](using $encoder, $ec)
+                  AsRaw.forFuture[Raw, r](using scala.compiletime.summonInline[AsRaw[Raw, r]], $ec)
                 futureEncoder.asRaw($resultExpr)
               }
         case _ => reject
@@ -197,14 +190,9 @@ object AsRawDerivation:
     val decodedArgs: List[Term] = plan.params.zipWithIndex.map { case (param, i) =>
       param.paramType match
         case '[t] =>
-          val decoder = Expr
-            .summon[AsReal[Raw, t]]
-            .getOrElse(
-              report.errorAndAbort(
-                s"no AsReal[Raw, ${TypeRepr.of[t].show}] to decode argument $i of '${plan.rpcName}'",
-              ),
-            )
-          '{ $decoder.asReal($flatArgs(${ Expr(i) })) }.asTerm
+          // Decode each arg to its exact declared type via a `summonInline`d `AsReal[Raw, t]` in the
+          // generated code (which reports a missing instance itself).
+          '{ scala.compiletime.summonInline[AsReal[Raw, t]].asReal($flatArgs(${ Expr(i) })) }.asTerm
     }
 
     val argsTuple = buildArgsTuple(decodedArgs, opTerm)

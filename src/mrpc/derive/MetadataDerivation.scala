@@ -26,9 +26,9 @@ import scala.quoted.*
  *   - `@rpcParamMetadata` (arity)      -> projects over [[OpReflect.inputElems]] (declaration order), same
  *                                         arity shaping; `Map` slots keyed by paramName.
  *
- * No-fork guarantee: resolved rpcNames come from [[RpcName.computeAll]] and arity from
- * [[Matcher.arityTagOf]] — the SAME engine introspection the matcher/dispatcher use. The metadata cannot
- * drift from what the engine dispatches.
+ * No-fork guarantee: resolved rpcNames come from [[RpcName.computeAll]] and the op set from
+ * [[Matcher.operationTypes]] — the SAME engine introspection the matcher/dispatcher use. The metadata
+ * cannot drift from what the engine dispatches.
  *
  * Pitfall-3 (`@composite`): the per-element build threads a [[Context]] (the current op / param `Type`),
  * and `@composite` recurses with the SAME `Context` so the nested class's `@reifyName` reads the real

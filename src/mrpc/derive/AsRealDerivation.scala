@@ -155,16 +155,9 @@ object AsRealDerivation:
       case Arity.Call(resultType) =>
         resultType match
           case '[r] =>
-            val decoder = Expr
-              .summon[AsReal[Raw, r]]
-              .getOrElse(
-                report.errorAndAbort(
-                  s"no AsReal[Raw, ${TypeRepr.of[r].show}] to decode the result of '${plan.rpcName}'",
-                ),
-              )
             '{
               val futureDecoder: AsReal[Future[Raw], Future[r]] =
-                AsReal.forFuture[Raw, r](using $decoder, $ec)
+                AsReal.forFuture[Raw, r](using scala.compiletime.summonInline[AsReal[Raw, r]], $ec)
               futureDecoder.asReal($raw.call($invocation))
             }
       case Arity.Get(subRpcType) =>
@@ -194,22 +187,13 @@ object AsRealDerivation:
     plan: OpPlan,
     flatArgTerms: List[q.reflect.Term],
   ): Expr[RawInvocation[Raw]] =
-    import q.reflect.*
-
-    val encodedArgs: List[Expr[Raw]] = plan.params.zip(flatArgTerms).zipWithIndex.map { case ((param, argTerm), i) =>
+    val encodedArgs: List[Expr[Raw]] = plan.params.zip(flatArgTerms).map { case (param, argTerm) =>
       param.paramType match
         case '[t] =>
-          val encoder = Expr
-            .summon[AsRaw[Raw, t]]
-            .getOrElse(
-              report.errorAndAbort(
-                s"no AsRaw[Raw, ${TypeRepr.of[t].show}] to encode argument $i of '${plan.rpcName}'",
-              ),
-            )
-          Select
-            .unique(encoder.asTerm, "asRaw")
-            .appliedTo(argTerm)
-            .asExprOf[Raw]
+          // The per-param encoder is resolved in the GENERATED code via `summonInline` rather than at
+          // macro-expansion time via `Expr.summon`; a missing `AsRaw[Raw, t]` is reported by
+          // `summonInline` itself. This drops the explicit summon + manual `Select.unique` term build.
+          '{ scala.compiletime.summonInline[AsRaw[Raw, t]].asRaw(${ argTerm.asExprOf[t] }) }
     }
 
     val sizes = OpReflect.paramListSizes(plan.opType)

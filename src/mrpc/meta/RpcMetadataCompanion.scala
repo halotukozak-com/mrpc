@@ -18,7 +18,7 @@ package mrpc.meta
  *
  * The macro reads `M`'s primary-constructor params, classifies each by its steering annotation, and
  * fills it from the real trait's `made.Done` structure — reusing `RpcName.computeAll` for resolved
- * names and `Matcher.arityTagOf` for arity so metadata names cannot drift from the engine's.
+ * names so metadata names cannot drift from the engine's.
  */
 trait RpcMetadataCompanion[M[_]]:
   inline def materialize[Real]: M[Real] =

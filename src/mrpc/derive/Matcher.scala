@@ -91,16 +91,6 @@ private[mrpc] object Matcher:
       planOne(op, name, index)
     }
 
-  /**
-   * Reuse surface: the arity TAG (`"fire"`|`"call"`|`"get"`) for an op type — the SAME classification
-   * [[planOne]] applies via [[arityOf]], exposed for the metadata fold so there is no second classifier.
-   */
-  private[mrpc] def arityTagOf(opType: Type[?])(using Quotes): String =
-    arityOf(OpReflect.outputType(opType)) match
-      case Arity.Fire => "fire"
-      case Arity.Call(_) => "call"
-      case Arity.Get(_) => "get"
-
   /** Extracts the refined `DoneOperation` element types from the (passed-in) mirror's `Operations`. */
   private[mrpc] def operationTypes[T: Type](doneExpr: Expr[Done.Of[T]])(using Quotes): List[Type[?]] =
     import quotes.reflect.*
