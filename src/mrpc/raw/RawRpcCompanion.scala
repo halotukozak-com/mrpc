@@ -30,7 +30,7 @@ trait RawRpcCompanion[Raw]:
   // The client proxy: a `RawRpc[Raw]` yields a `Real` trait implementation, so its conversion is
   // `AsReal[RawRpc[Raw], Real]` (distinct from the leaf `AsRealRpc[Real] = AsReal[Raw, Real]` codec).
   inline def materializeAsReal[Real: Done.Of](using ExecutionContext): AsReal[RawRpc[Raw], Real] =
-    ${ mrpc.derive.AsRealDerivation.impl[Raw, Real]('summon, 'summon) }
+    mrpc.derive.AsRealDerivation.impl[Raw, Real]
 
   // The combined direction is not needed by any consumer yet; it can be assembled from the two
   // separate directions when a use case appears. compiletime.error fires only if called, so the API

@@ -168,7 +168,7 @@ object AsRawDerivation:
   ): q.reflect.Term =
     import q.reflect.*
 
-    val opTerm = selectOperation[Real](done, plan)
+    val opTerm = selectOperation[Real](done, plan).asTerm
 
     val flatArgs = '{ ${ inv }.args.flatten }
 
@@ -205,21 +205,14 @@ object AsRawDerivation:
   private def selectOperation[Real: Type](
     done: Expr[Done.Of[Real]],
     plan: OpPlan,
-  )(using q: Quotes,
-  ): q.reflect.Term =
-    import q.reflect.*
-    // Pull operation `index` off the runtime `operations` tuple and recover its precise refined type
-    // so `op.Args`/`op.OutputType` resolve for the type-safe `Done.invoke`. `productElement` is typed
-    // `Any` (made's `Operations` is a transparent-given refinement the compiler keeps bound, so neither
-    // `.head`/`.tail` reduction nor a checked ascription is available here). The narrowing to
+  )(using Quotes,
+  ): Expr[Any] =
+    // Pull operation `index` off the runtime `operations` tuple and narrow it to its precise refined
+    // type so `op.Args`/`op.OutputType` resolve for the type-safe `Done.invoke`. `productElement` is
+    // typed `Any` (made's `Operations` is a transparent-given refinement the compiler keeps bound, so
+    // neither `.head`/`.tail` reduction nor a checked ascription is available). The narrowing to
     // `plan.opType` is the SINGLE narrowing in the adapter and is provably sound: the matcher derived
-    // `plan.opType` from THIS SAME mirror, so the runtime element IS exactly that operation type. It is
-    // generated via the runtime cast method (referenced by name, not via the source token) precisely so
-    // this safe, mirror-justified narrowing is not confused with an unsafe value cast.
-    val castMethod = "as" + "InstanceOf"
-    val element = Select
-      .unique('{ ${ done }.operations }.asTerm, "productElement")
-      .appliedTo(Literal(IntConstant(plan.index)))
+    // `plan.opType` from THIS SAME mirror, so the runtime element IS exactly that operation type.
     plan.opType match
-      case '[op] => TypeApply(Select.unique(element, castMethod), List(TypeTree.of[op]))
+      case '[op] => '{ $done.operations.productElement(${ Expr(plan.index) }).asInstanceOf[op] }
 

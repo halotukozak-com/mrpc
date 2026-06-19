@@ -26,17 +26,20 @@ import scala.quoted.*
 object AsRealDerivation:
 
   /**
-   * Builds the client proxy `AsReal[RawRpc[Raw], Real]`. `ec` is threaded as a `using` parameter so the
-   * `call` arity can compose the result decoder `AsReal[Future[Raw], Future[r]]` via `forFuture`.
+   * The client-proxy conversion as a plain value: `asReal` turns a `RawRpc[Raw]` into a `Real` proxy
+   * via the [[materializeProxy]] macro. The `AsReal` wrapper itself is ordinary Scala; only the
+   * per-`raw` proxy body is generated. `ExecutionContext` is in scope so the `call` arity can compose
+   * `AsReal[Future[Raw], Future[r]]` via `forFuture`.
    */
-  def impl[Raw: Type, Real: Type](done: Expr[Done.Of[Real]], ec: Expr[ExecutionContext])(using Quotes)
-    : Expr[AsReal[RawRpc[Raw], Real]] =
-    val plans: List[OpPlan] = Matcher.planAll[Real](done)
-    '{
-      new AsReal[RawRpc[Raw], Real]:
-        def asReal(raw: RawRpc[Raw]): Real =
-          ${ materializeProxy[Raw, Real]('raw, plans, ec, done) }
-    }
+  inline def impl[Raw, Real](using Done.Of[Real], ExecutionContext): AsReal[RawRpc[Raw], Real] =
+    (raw: RawRpc[Raw]) => materializeProxy[Raw, Real](raw)
+
+  /**
+   * Macro entry: build the `Real` client proxy for a single `RawRpc[Raw]`. The mirror and
+   * `ExecutionContext` are summoned here and handed to [[materializeProxyImpl]].
+   */
+  inline def materializeProxy[Raw, Real](raw: RawRpc[Raw])(using Done.Of[Real], ExecutionContext): Real =
+    ${ materializeProxyImpl[Raw, Real]('raw, 'summon, 'summon) }
 
   /**
    * Builds the proxy via made's `Done.materialize`: one handler per plan — shaped to match made's
@@ -55,13 +58,13 @@ object AsRealDerivation:
    * evidence the slot requires (`ValidHandlers[mirror.Operations, hs]`) syntactically what `refl`
    * supplies, so no reduction is needed.
    */
-  private def materializeProxy[Raw: Type, Real: Type](
+  private def materializeProxyImpl[Raw: Type, Real: Type](
     raw: Expr[RawRpc[Raw]],
-    plans: List[OpPlan],
-    ec: Expr[ExecutionContext],
     done: Expr[Done.Of[Real]],
+    ec: Expr[ExecutionContext],
   )(using Quotes,
   ): Expr[Real] =
+    val plans = Matcher.planAll[Real](done)
     val handlers: List[Expr[Any]] = plans.map(plan => handlerFor[Raw](raw, plan, ec))
     val handlersTuple: Expr[Tuple] = Expr.ofTupleFromSeq(handlers)
     handlersTupleType[Real](done) match
