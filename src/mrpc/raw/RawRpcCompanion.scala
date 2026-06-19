@@ -25,7 +25,7 @@ trait RawRpcCompanion[Raw]:
   // The server adapter: a `Real` trait yields a `RawRpc[Raw]`, so its conversion is
   // `AsRaw[RawRpc[Raw], Real]` (distinct from the leaf `AsRawRpc[Real] = AsRaw[Raw, Real]` codec).
   inline def materializeAsRaw[Real: Done.Of](using ExecutionContext): AsRaw[RawRpc[Raw], Real] =
-    ${ mrpc.derive.AsRawDerivation.impl[Raw, Real]('summon, 'summon) }
+    mrpc.derive.AsRawDerivation.impl[Raw, Real]
 
   // The client proxy: a `RawRpc[Raw]` yields a `Real` trait implementation, so its conversion is
   // `AsReal[RawRpc[Raw], Real]` (distinct from the leaf `AsRealRpc[Real] = AsReal[Raw, Real]` codec).

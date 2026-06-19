@@ -107,27 +107,13 @@ object AsRealDerivation:
     ec: Expr[ExecutionContext],
   )(using Quotes,
   ): Expr[Any] =
-    val outTpe: Type[?] = OpReflect.outputType(plan.opType)
-    if plan.params.isEmpty then
-      outTpe match
-        case '[o] =>
-          '{ () => ${ handlerBody[Raw, EmptyTuple]('{ EmptyTuple }, plan, raw, ec).asExprOf[o] } }
-    else
-      val argsTpe = tupleTypeOf(plan.params.map(_.paramType))
-      argsTpe.asType match
-        case '[type a <: Tuple; a] =>
-          outTpe match
-            case '[o] =>
-              '{ (args: a) => ${ handlerBody[Raw, a]('args, plan, raw, ec).asExprOf[o] } }
-
-  /** Builds the `op.Args` tuple type from the flattened param types (`t1 *: ... *: EmptyTuple`). */
-  private def tupleTypeOf(tpes: List[Type[?]])(using Quotes): quotes.reflect.TypeRepr =
-    import quotes.reflect.*
-    tpes.foldRight(TypeRepr.of[EmptyTuple]) { (t, acc) =>
-      (t, acc.asType) match
-        case ('[x], '[type r <: Tuple; r]) => TypeRepr.of[x *: r]
-        case _ => acc
-    }
+    // The handler's precise type (`Done.HandlerOf[op]`) is imposed by the enclosing tuple ascription in
+    // `handlersTupleType`, so here we only need the right ARITY shape: made invokes a no-param op's
+    // handler as `() => _` and a parametric op's as `<tuple> => _`. The argument is typed `Tuple`
+    // (erasure-compatible with made's NamedTuple arg) and destructured positionally in `handlerBody`;
+    // the body is left `Any` (the ascription re-types it to the op's `OutputType`).
+    if plan.params.isEmpty then '{ () => ${ handlerBody[Raw, EmptyTuple]('{ EmptyTuple }, plan, raw, ec) } }
+    else '{ (args: Tuple) => ${ handlerBody[Raw, Tuple]('args, plan, raw, ec) } }
 
   /**
    * The body of one handler: package a [[RawInvocation]] (resolved `rpcName` + nested encoded args) and

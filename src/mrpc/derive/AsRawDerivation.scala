@@ -24,22 +24,41 @@ import scala.quoted.*
 object AsRawDerivation:
 
   /**
-   * Builds the server adapter `AsRaw[RawRpc[Raw], Real]`. `ec` is threaded as a `using` parameter
-   * from the concrete companion (never a global) so the `call` arity can compose the result
-   * `AsRaw[Future[Raw], Future[r]]` via `forFuture`.
+   * The server-adapter conversion as a plain value: `asRaw` wraps a `Real` in the `RawRpc[Raw]` built
+   * by the [[buildRawRpc]] macro. The `AsRaw` wrapper is ordinary Scala (a SAM lambda); only the
+   * `RawRpc` itself — its arity-partitioned `fire`/`call`/`get` dispatch — is generated.
    */
-  def impl[Raw: Type, Real: Type](done: Expr[Done.Of[Real]], ec: Expr[ExecutionContext])(using Quotes)
-    : Expr[AsRaw[RawRpc[Raw], Real]] =
+  inline def impl[Raw, Real](using Done.Of[Real], ExecutionContext): AsRaw[RawRpc[Raw], Real] =
+    (api: Real) => buildRawRpc[Raw, Real](api)
+
+  /**
+   * Macro entry: build the dispatching `RawRpc[Raw]` for a `Real` instance. The mirror and
+   * `ExecutionContext` are summoned here and handed to [[buildRawRpcImpl]]. `ExecutionContext` is in
+   * scope so the `call` arity can compose `AsRaw[Future[Raw], Future[r]]` via `forFuture`.
+   */
+  inline def buildRawRpc[Raw, Real](api: Real)(using Done.Of[Real], ExecutionContext): RawRpc[Raw] =
+    ${ buildRawRpcImpl[Raw, Real]('api, 'summon, 'summon) }
+
+  /**
+   * Builds the `RawRpc[Raw]` whose `fire`/`call`/`get` dispatch incoming invocations by `rpcName`. The
+   * anonymous class lives in this generated quote (not an `inline` body), and `plans` is computed ONCE
+   * here and shared across the three arity-partitioned bodies.
+   */
+  private def buildRawRpcImpl[Raw: Type, Real: Type](
+    api: Expr[Real],
+    done: Expr[Done.Of[Real]],
+    ec: Expr[ExecutionContext],
+  )(using Quotes,
+  ): Expr[RawRpc[Raw]] =
     val plans = Matcher.planAll[Real](done)
     '{
-      new AsRaw[RawRpc[Raw], Real]:
-        def asRaw(api: Real): RawRpc[Raw] = new RawRpc[Raw]:
-          def fire(invocation: RawInvocation[Raw]): Unit =
-            ${ fireBody[Raw, Real]('api, 'invocation, plans, done) }
-          def call(invocation: RawInvocation[Raw]): Future[Raw] =
-            ${ callBody[Raw, Real]('api, 'invocation, plans, ec, done) }
-          def get(invocation: RawInvocation[Raw]): RawRpc[Raw] =
-            ${ getBody[Raw, Real]('api, 'invocation, plans, done) }
+      new RawRpc[Raw]:
+        def fire(invocation: RawInvocation[Raw]): Unit =
+          ${ fireBody[Raw, Real](api, 'invocation, plans, done) }
+        def call(invocation: RawInvocation[Raw]): Future[Raw] =
+          ${ callBody[Raw, Real](api, 'invocation, plans, ec, done) }
+        def get(invocation: RawInvocation[Raw]): RawRpc[Raw] =
+          ${ getBody[Raw, Real](api, 'invocation, plans, done) }
     }
 
   // --- arity-partitioned dispatch bodies ---
