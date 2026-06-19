@@ -21,6 +21,31 @@ sealed trait RpcNames[T]:
 object RpcNames:
   transparent inline given derived[T]: RpcNames[T] = ${ deriveImpl[T] }
 
+  /**
+   * Reads the resolved names back off `RpcNames[T].Names` (the type-level singletons) as a `List`,
+   * in `Done.Operations` order. The single name-resolution authority for macro consumers (engine,
+   * metadata) — summons the type-level names and lowers them, rather than each caller re-running
+   * `RpcName.computeAll`.
+   */
+  private[derive] def namesOf[T: Type](using Quotes): List[String] =
+    import quotes.reflect.*
+    Expr.summon[RpcNames[T]] match
+      case Some(rn) =>
+        val rnTpe = rn.asTerm.tpe.widen
+        rnTpe.select(rnTpe.typeSymbol.typeMember("Names")).dealias.asType match
+          case '[type ns <: Tuple; ns] =>
+            TupleTraverse.traverseTuple(Type.of[ns]).map { t =>
+              TypeRepr.of(using t).dealias match
+                case ConstantType(StringConstant(s)) => s
+                case other => report.errorAndAbort(s"RpcNames entry is not a string literal: ${other.show}")
+            }
+          case _ => report.errorAndAbort("RpcNames.Names is not a Tuple")
+      case None =>
+        // `RpcNames[T]` failed to derive. The usual cause is a resolution abort (e.g. a duplicate
+        // rpcName) that `Expr.summon` swallows into a non-match, hiding the real message. Re-run the
+        // resolution directly so that error surfaces verbatim; if it actually succeeds, use its result.
+        RpcName.computeAll(Matcher.operationTypes[T](Matcher.summonDone[T]))
+
   private def deriveImpl[T: Type](using Quotes): Expr[RpcNames[T]] =
     import quotes.reflect.*
     val done = Matcher.summonDone[T]

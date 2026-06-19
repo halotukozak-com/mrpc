@@ -84,9 +84,10 @@ private[mrpc] object Matcher:
    */
   def planAll[T: Type](done: Expr[Done.Of[T]])(using Quotes): List[OpPlan] =
     val ops = operationTypes(done)
-    // Names are resolved across the whole op set so overloads disambiguate and duplicates are
-    // detected; the matcher then attaches arity + param plans to each resolved name.
-    val resolvedNames = RpcName.computeAll(ops)
+    // Names come from the single authority `RpcNames[T]` (type-level `Names`, read back by `namesOf`).
+    // `namesOf` falls back to a direct `computeAll` when the mirror can't be summoned, so the
+    // duplicate-name abort still surfaces verbatim (see CompileErrorSuite).
+    val resolvedNames = RpcNames.namesOf[T]
     ops.zip(resolvedNames).zipWithIndex.map { case ((op, name), index) =>
       planOne(op, name, index)
     }

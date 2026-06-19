@@ -53,7 +53,9 @@ private[mrpc] object MetadataDerivation:
 
     val done = Matcher.summonDone[Real]
     val ops: List[Type[?]] = Matcher.operationTypes[Real](done) // refined op types, Done order
-    val names: List[String] = RpcName.computeAll(ops) // resolved rpcNames — SAME as the engine
+    // Resolved rpcNames come from the type-level `RpcNames[Real].Names` (one authority), read back as
+    // values here — SAME order and result as the engine's `RpcName.computeAll`.
+    val names: List[String] = RpcNames.namesOf[Real]
 
     val metaTpe: TypeRepr = TypeRepr.of[M[Real]]
     buildValue(metaTpe, Context.Trait(ops, names)).asExprOf[M[Real]]
