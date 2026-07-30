@@ -9,11 +9,9 @@ import scala.quoted.*
  * reimplemented verbatim.
  */
 private[derive] object TupleTraverse:
-
-  def traverseTuple(tpe: Type[? <: Tuple])(using Quotes): List[Type[? <: AnyKind]] =
-    tpe match
-      case '[EmptyTuple] => Nil
-      case '[t *: ts] => Type.of[t] :: traverseTuple(Type.of[ts])
+  def traverseTuple[Tup <: Tuple: Type, T: Type](using Quotes): List[Type[? <: T]] = Type.of[Tup] match
+    case '[EmptyTuple] => Nil
+    case '[type t <: T; *:[t, ts]] => Type.of[t] :: traverseTuple[ts, T]
 
   /** Folds element types into a `*:`-cons tuple type, in order — the inverse of [[traverseTuple]]. */
   def foldTuple(elems: List[Type[?]])(using Quotes): Type[? <: Tuple] =

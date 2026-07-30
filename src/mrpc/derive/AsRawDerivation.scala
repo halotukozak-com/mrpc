@@ -1,9 +1,10 @@
 package mrpc.derive
 
-import made.Done
+import made.{Done, DoneOperation}
 import mrpc.conv.{AsRaw, AsReal}
 import mrpc.raw.{RawInvocation, RawRpc}
 
+import scala.annotation.tailrec
 import scala.concurrent.{ExecutionContext, Future}
 import scala.quoted.*
 
@@ -133,14 +134,14 @@ object AsRawDerivation:
   )(using Quotes,
   ): Expr[Unit] =
     val arms = plans.filter(p =>
-      arityOf(p.opType) match
+      (p.opType.runtimeChecked match
+        case '[OpPlan { type ArityInfo = a }] => Type.of[a]
+      ) match
         case '[ArityTag.Fire] => true
         case _ => false,
     )
     matchOnName[Raw, Unit](inv, arms, '{ () }) { plan =>
-      val invokeTerm = invokeOp[Raw, Real](api, inv, plan, done)
-      // Fire ops return Unit; invoking for its side effect is the whole job.
-      '{ ${ invokeTerm.asExprOf[Any] }; () }
+      '{ ${ invokeOp[Raw, Real, Any](api, inv, plan, done) }: Unit }
     }
 
   private def callBody[Raw: Type, Real: Type](
@@ -151,20 +152,19 @@ object AsRawDerivation:
     done: Expr[Done.Of[Real]],
   )(using Quotes,
   ): Expr[Future[Raw]] =
-    val reject = '{
-      throw new IllegalArgumentException(
-        "unknown rpc name for call: " + ${ inv }.rpcName,
-      )
-    }
     val arms = plans.filter(p =>
-      arityOf(p.opType) match
+      (p.opType.runtimeChecked match
+        case '[OpPlan { type ArityInfo = a }] => Type.of[a]
+      ) match
         case '[ArityTag.CallOf[?]] => true
         case _ => false,
     )
-    matchOnName[Raw, Future[Raw]](inv, arms, reject) { plan =>
-      arityOf(plan.opType) match
+    matchOnName[Raw, Future[Raw]](inv, arms, reject(inv)) { plan =>
+      (plan.opType.runtimeChecked match
+        case '[OpPlan { type ArityInfo = a }] => Type.of[a]
+      ) match
         case '[ArityTag.CallOf[r]] =>
-          val resultExpr = invokeOp[Raw, Real](api, inv, plan, done).asExprOf[Future[r]]
+          val resultExpr = invokeOp[Raw, Real, Future[r]](api, inv, plan, done)
           // Compose the leaf result encoder over Future via `forFuture`, threading the
           // companion-supplied ExecutionContext — never a global one. The encoder is resolved in
           // the generated code via `summonInline` (which reports a missing `AsRaw[Raw, r]` itself).
@@ -173,7 +173,7 @@ object AsRawDerivation:
               AsRaw.forFuture[Raw, r](using scala.compiletime.summonInline[AsRaw[Raw, r]], $ec)
             futureEncoder.asRaw($resultExpr)
           }
-        case _ => reject
+        case _ => reject(inv)
     }
 
   private def getBody[Raw: Type, Real: Type](
@@ -183,26 +183,25 @@ object AsRawDerivation:
     done: Expr[Done.Of[Real]],
   )(using Quotes,
   ): Expr[RawRpc[Raw]] =
-    val reject = '{
-      throw new IllegalArgumentException(
-        "unknown rpc name for get: " + ${ inv }.rpcName,
-      )
-    }
     val arms = plans.filter(p =>
-      arityOf(p.opType) match
+      (p.opType.runtimeChecked match
+        case '[OpPlan { type ArityInfo = a }] => Type.of[a]
+      ) match
         case '[ArityTag.GetOf[?]] => true
         case _ => false,
     )
-    matchOnName[Raw, RawRpc[Raw]](inv, arms, reject) { plan =>
-      arityOf(plan.opType) match
+    matchOnName[Raw, RawRpc[Raw]](inv, arms, reject(inv)) { plan =>
+      (plan.opType.runtimeChecked match
+        case '[OpPlan { type ArityInfo = a }] => Type.of[a]
+      ) match
         case '[ArityTag.GetOf[sub]] =>
-          val subInstance = invokeOp[Raw, Real](api, inv, plan, done).asExprOf[sub]
+          val subInstance = invokeOp[Raw, Real, sub](api, inv, plan, done)
           '{
             AsRaw
               .makeLazy[RawRpc[Raw], sub](compiletime.summonInline[AsRaw[RawRpc[Raw], sub]])
               .asRaw($subInstance)
           }
-        case _ => reject
+        case _ => reject(inv)
     }
 
   // --- shared helpers ---
@@ -231,21 +230,12 @@ object AsRawDerivation:
     val default = CaseDef(Wildcard(), None, reject.asTerm)
     Match(scrutinee, caseDefs :+ default).asExprOf[Res]
 
-  /** The plan's `ArityInfo` member — quote-pattern-match the result directly at the call site. */
-  private def arityOf(plan: Type[?])(using Quotes): Type[?] =
-    plan.runtimeChecked match
-      case '[OpPlan { type ArityInfo = a }] => Type.of[a]
-
   /** Each parameter's declared `ParamType`, in the op's declaration order, off `plan`'s `Params`. */
   private def paramTypesOf(plan: Type[?])(using Quotes): List[Type[?]] =
     (plan.runtimeChecked match
-      case '[OpPlan { type Params = ps }] => Type.of[ps]
-    ) match
-      case '[type pst <: Tuple; pst] =>
-        TupleTraverse.traverseTuple(Type.of[pst]).map { pt =>
-          pt.runtimeChecked match
-            case '[ParamPlan { type ParamType = t }] => Type.of[t]
-        }
+      case '[type ps <: Tuple; OpPlan { type Params = ps }] =>
+        TupleTraverse.traverseTuple[ps, ParamPlan]
+    ).map { case '[ParamPlan { type ParamType = t }] => Type.of[t] }
 
   /**
    * Decodes the invocation's flat arguments to the operation's exact `InputElem.Type`s, assembles
@@ -255,61 +245,41 @@ object AsRawDerivation:
    * `inv.args` is nested per parameter list (`List[List[Raw]]`); it is flattened in `InputElems`
    * order before decoding, matching made's flattened `Args` contract.
    */
-  private def invokeOp[Raw: Type, Real: Type](
+  private def invokeOp[Raw: Type, Real: Type, R: Type](
     api: Expr[Real],
     inv: Expr[RawInvocation[Raw]],
     plan: Plan,
     done: Expr[Done.Of[Real]],
-  )(using q: Quotes,
-  ): q.reflect.Term =
-    import q.reflect.*
-
-    val opTerm = selectOperation[Real](done, plan).asTerm
-
+  )(using quotes: Quotes,
+  ): Expr[R] =
     val flatArgs = '{ ${ inv }.args.flatten }
 
-    // Decode each param to its EXACT declared type via a summoned AsReal[Raw, paramType]; the tuple
-    // element is then statically that type, so made's internal unboxing cast is a provable no-op.
-    val decodedArgs: List[Term] = paramTypesOf(plan.opType).zipWithIndex.map { case (paramType, i) =>
-      paramType match
-        case '[t] =>
-          '{ scala.compiletime.summonInline[AsReal[Raw, t]].asReal($flatArgs(${ Expr(i) })) }.asTerm
+    val decodedArgs: List[Expr[?]] = paramTypesOf(plan.opType).zipWithIndex.map:
+      case ('[t], i) =>
+        '{ scala.compiletime.summonInline[AsReal[Raw, t]].asReal($flatArgs(${ Expr(i) })) }
+      case (_, _) => ???
+
+    // todo: im not sure its required
+    @tailrec
+    def nth[T <: Tuple: Type](n: Int): Type[?] = Type.of[T] match
+      case '[h *: tail] => if n == 0 then Type.of[h] else nth[tail](n - 1)
+
+    val operation: Expr[? <: DoneOperation { type OuterType = Real }] = done match
+      case '{ type operations <: Tuple; $_ : { type Operations = operations } } =>
+        nth[operations](plan.index) match
+          case '[type op <: DoneOperation { type OuterType = Real; type OutputType = R }; op] =>
+            '{ $done.operations(${ Expr(plan.index) }).asInstanceOf[op] }
+          case '[type op <: DoneOperation { type OuterType = Real; type OutputType = Unit }; op] =>
+            '{ $done.operations(${ Expr(plan.index) }).asInstanceOf[op] }
+
+    val argsTuple = Expr.ofRefinedTuple(decodedArgs)
+
+    val res = '{
+      val op = $operation
+      $done.invoke(op, $api, $argsTuple.asInstanceOf[op.Args])
     }
+    '{ $res.asInstanceOf[R] }
 
-    // The decoded args are each statically their exact `InputElem.Type`, so the tuple already conforms
-    // to the op's `Args` (= `Tuple.Map[InputElems, ExtractOf]`) at the `Done.invoke` call below — no
-    // explicit ascription to the path-dependent `op.Args` is needed.
-    val argsTuple = Expr.ofRefinedTuple(decodedArgs.map(_.asExpr)).asTerm
-
-    // Done.invoke(done, op, api, args) — the type-safe extension (`Done.invoke[Real](done)(op, api,
-    // args)`). op carries OuterType = Real and Args = the exact tuple we built, both checked against
-    // `opTerm`'s refined type here. `invoke` is a top-level extension method on the `Done` companion.
-    val invokeRef = TypeApply(
-      Select.unique(Ref(TypeRepr.of[Done.type].termSymbol), "invoke"),
-      List(TypeTree.of[Real]),
-    )
-    Apply(
-      Apply(invokeRef, List(done.asTerm)),
-      List(opTerm, api.asTerm, argsTuple),
-    )
-
-  /**
-   * Selects `done.operations` element `index` and recovers its precise refined operation type so that
-   * `op.Args`/`op.OutputType`/`op.OuterType` resolve for the type-safe `Done.invoke` call. See the
-   * inline note on the single, mirror-justified narrowing this performs.
-   */
-  private def selectOperation[Real: Type](
-    done: Expr[Done.Of[Real]],
-    plan: Plan,
-  )(using Quotes,
-  ): Expr[Any] =
-    // Pull operation `index` off the runtime `operations` tuple and narrow it to its precise refined
-    // type so `op.Args`/`op.OutputType` resolve for the type-safe `Done.invoke`. `productElement` is
-    // typed `Any` (made's `Operations` is a transparent-given refinement the compiler keeps bound, so
-    // neither `.head`/`.tail` reduction nor a checked ascription is available). The narrowing to
-    // `plan.opType`'s `OpType` member is the SINGLE narrowing in the adapter and is provably sound: the
-    // matcher derived it from THIS SAME mirror, so the runtime element IS exactly that operation type.
-    val opType = plan.opType.runtimeChecked match
-      case '[OpPlan { type OpType = o }] => Type.of[o]
-    opType match
-      case '[op] => '{ $done.operations.productElement(${ Expr(plan.index) }).asInstanceOf[op] }
+  private def reject(inv: Expr[RawInvocation[?]])(using Quotes) = '{
+    throw new IllegalArgumentException("unknown rpc name for get: " + $inv.rpcName)
+  }

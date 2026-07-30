@@ -71,7 +71,8 @@ object AsRealDerivation:
   )(using Quotes,
   ): Expr[Real] =
     val plans = Matcher.plans[Real](done, names)
-    val handlers: List[Expr[Any]] = plans.map(plan => handlerFor[Raw](raw, plan, ec))
+    val handlers: List[Expr[Any]] = plans.map:
+      case '[type plan <: OpPlan; plan] => handlerFor[Raw, plan](raw, ec)
     // `ofRefinedTuple` keeps each handler's own precise type through the fold, so pattern-matching its
     // result back to a bound type `hs` (rather than stashing it in a `val: Expr[Tuple]`, which would
     // widen it right back down) lets the quote below see the handler tuple at that PRECISE type —
@@ -90,7 +91,7 @@ object AsRealDerivation:
           // off `$done` directly) so `.Operations` is a stable path `to`/`refl` can reference; `$done`
           // itself need not denote a stable path (e.g. it may be a `summon[Done.Of[Real]]` call).
           val mirror: Done.Of[Real] = $done
-          $handlersTuple.to[Real](using mirror)(using ValidHandlers.refl[mirror.Operations, hs])
+          $handlersTuple.to[Real](using mirror)(using ValidHandlers.refl)
         }
 
   /**
@@ -101,50 +102,38 @@ object AsRealDerivation:
    * destructured back into positional argument terms (each cast to its exact param type), encoded,
    * packaged into a [[RawInvocation]], and dispatched by arity.
    */
-  private def handlerFor[Raw: Type](
+  private def handlerFor[Raw: Type, Plan <: OpPlan: Type](
     raw: Expr[RawRpc[Raw]],
-    plan: Type[?],
     ec: Expr[ExecutionContext],
   )(using Quotes,
   ): Expr[?] =
-    if paramsOf(plan).isEmpty then '{ () => ${ handlerBody[Raw, EmptyTuple]('{ EmptyTuple }, plan, raw, ec) } }
+    if paramsOf[Plan].isEmpty then '{ () => ${ handlerBody[Raw, Plan]('{ EmptyTuple }, raw, ec) } }
     else
-      // No bound (`<: Product`/`<: Tuple`) on `argsT` here: a `NamedTuple` built from these
-      // quote-pattern-bound (skolem) `n`/`v` type variables fails such bound checks in a quote
-      // pattern, even though the SAME subtyping holds for ordinary, non-macro code — so `argsT` is
-      // left unbounded and `handlerBody` reaches into it via an explicit `asInstanceOf[Product]`.
-      namedArgsType(plan) match
-        case '[argsT] =>
-          '{ (args: argsT) => ${ handlerBody[Raw, argsT]('args, plan, raw, ec) } }
+      TupleTraverse.foldTuple(paramsOf[Plan].map(_.paramType)) match
+        case '[type args <: Tuple; args] =>
+          '{ (args: args) => ${ handlerBody[Raw, Plan]('args, raw, ec) } }
 
   /**
    * The op's argument type, exactly as made's [[Done.HandlerOf]] computes it: a `NamedTuple` keyed by
    * each param's label (a singleton-string tuple, same `ConstantType(StringConstant(...))` idiom
    * [[Matcher.planOne]] uses), valued by each param's declared type.
    */
-  private def namedArgsType(plan: Type[?])(using Quotes): Type[?] =
-    import quotes.reflect.*
-    val params = paramsOf(plan)
-    val namesType = TupleTraverse.foldTuple(params.map(p => ConstantType(StringConstant(p.label)).asType))
-    val typesType = TupleTraverse.foldTuple(params.map(_.paramType))
-    (namesType, typesType) match
-      case ('[type n <: Tuple; n], '[type v <: Tuple; v]) => Type.of[scala.NamedTuple.NamedTuple[n, v]]
-      case _ => report.errorAndAbort(s"could not build named-tuple arg type for ${TypeRepr.of(using plan).show}")
 
   /** One parameter's label + declared type, read off `plan`'s `Params` tuple, in order. */
-  private def paramsOf(plan: Type[?])(using Quotes): List[(label: String, paramType: Type[?])] =
-    (plan.runtimeChecked match
-      case '[OpPlan { type Params = ps }] => Type.of[ps]
-    ) match
-      case '[type pst <: Tuple; pst] =>
-        TupleTraverse.traverseTuple(Type.of[pst]).map { pt =>
-          pt.runtimeChecked match
-            case '[type l <: String; ParamPlan { type Label = l; type ParamType = t }] =>
-              val label = Type
-                .valueOfConstant[l]
-                .getOrElse(quotes.reflect.report.errorAndAbort("Label is not a string literal"))
-                .toString
-              (label = label, paramType = Type.of[t])
+  private def paramsOf[Plan <: OpPlan: Type](using Quotes): List[(label: String, paramType: Type[?])] =
+    Type.of[Plan] match
+      case '[type ps <: Tuple; OpPlan { type Params = ps }] =>
+        TupleTraverse.traverseTuple[ps, ParamPlan].map {
+          case '[type l <: String; ParamPlan {
+                type Label = l
+                type ParamType = t
+              }] =>
+            val label = Type
+              .valueOfConstant[l]
+              .getOrElse(quotes.reflect.report.errorAndAbort("Label is not a string literal"))
+              .toString
+
+            (label = label, paramType = Type.of[t])
         }
 
   /**
@@ -152,9 +141,8 @@ object AsRealDerivation:
    * forward to `raw.fire`/`raw.call`/`raw.get` by the planned arity, decoding the result to the op's
    * exact declared `OutputType`.
    */
-  private def handlerBody[Raw: Type, A: Type](
-    args: Expr[A],
-    plan: Type[?],
+  private def handlerBody[Raw: Type, Plan <: OpPlan: Type](
+    args: Expr[? <: Tuple],
     raw: Expr[RawRpc[Raw]],
     ec: Expr[ExecutionContext],
   )(using Quotes,
@@ -163,26 +151,24 @@ object AsRealDerivation:
     // the per-param `AsRaw[Raw, t]` encoder applies as the source would. `A` carries no `Product`
     // bound (see `handlerFor`), so `args` is cast to `Product` here — safe, since every `A` this is
     // called with (`EmptyTuple` or a `NamedTuple`) IS one at runtime.
-    val flatArgTerms: List[Expr[?]] = paramsOf(plan).zipWithIndex.map { case (param, i) =>
+    val flatArgTerms: List[Expr[?]] = paramsOf[Plan].zipWithIndex.map { case (param, i) =>
       param.paramType match
         case '[t] =>
-          '{ $args.asInstanceOf[Product].productElement(${ Expr(i) }).asInstanceOf[t] }
+          '{ $args(${ Expr(i) }).asInstanceOf[t] }
     }
 
-    val invocation = invocationExpr[Raw](plan, flatArgTerms)
+    val invocation = invocationExpr[Raw, Plan](flatArgTerms)
 
-    val arityInfo: Type[?] = plan.runtimeChecked match
-      case '[OpPlan { type ArityInfo = a }] => Type.of[a]
-    arityInfo match
-      case '[ArityTag.Fire] =>
+    Type.of[Plan] match
+      case '[{ type ArityInfo = ArityTag.Fire }] =>
         '{ $raw.fire($invocation) }
-      case '[ArityTag.CallOf[r]] =>
+      case '[{ type ArityInfo = ArityTag.CallOf[r] }] =>
         '{
           val futureDecoder: AsReal[Future[Raw], Future[r]] =
             AsReal.forFuture[Raw, r](using scala.compiletime.summonInline[AsReal[Raw, r]], $ec)
           futureDecoder.asReal($raw.call($invocation))
         }
-      case '[ArityTag.GetOf[sub]] =>
+      case '[{ type ArityInfo = ArityTag.GetOf[sub] }] =>
         '{
           val subProxy = compiletime.summonInline[AsReal[RawRpc[Raw], sub]]
           AsReal.makeLazy[RawRpc[Raw], sub](subProxy).asReal($raw.get($invocation))
@@ -193,20 +179,19 @@ object AsRealDerivation:
    * summoned `AsRaw[Raw, paramType]`, then the flat encoded list is split back into `List[List[Raw]]`
    * per the op's `ParamLists` sizes — the exact inverse of the server adapter's `args.flatten`.
    */
-  private def invocationExpr[Raw: Type](
+  private def invocationExpr[Raw: Type, Plan <: OpPlan: Type](
     using quotes: Quotes,
   )(
-    plan: Type[?],
     flatArgTerms: List[Expr[Any]],
   ): Expr[RawInvocation[Raw]] =
     import quotes.reflect.*
-    val encodedArgs: List[Expr[Raw]] = paramsOf(plan).zip(flatArgTerms).map { case (param, argTerm) =>
+    val encodedArgs: List[Expr[Raw]] = paramsOf[Plan].zip(flatArgTerms).map { case (param, argTerm) =>
       param.paramType match
         case '[t] =>
           '{ scala.compiletime.summonInline[AsRaw[Raw, t]].asRaw(${ argTerm.asExprOf[t] }) }
     }
 
-    val opType = plan.runtimeChecked match
+    val opType = Type.of[Plan] match
       case '[OpPlan { type OpType = o }] => Type.of[o]
     val sizes = OpReflect.paramListSizes(opType)
     val nested: List[List[Expr[Raw]]] = splitBySizes(encodedArgs, sizes)
@@ -214,7 +199,7 @@ object AsRealDerivation:
     val argsExpr: Expr[List[List[Raw]]] =
       if nested.forall(_.isEmpty) then '{ Nil } else Expr.ofList(nestedExprs)
 
-    val rpcName = plan.runtimeChecked match
+    val rpcName = Type.of[Plan] match
       case '[type n <: String; OpPlan { type RpcName = n }] =>
         Type.valueOfConstant[n].getOrElse(report.errorAndAbort("RpcName is not a string literal"))
 

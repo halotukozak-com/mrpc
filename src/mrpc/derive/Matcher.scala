@@ -1,6 +1,7 @@
 package mrpc.derive
 
-import made.Done
+import made.{Done, DoneOperation, InputElem}
+import mrpc.derive.OpReflect.paramOf
 
 import scala.concurrent.Future
 import scala.quoted.*
@@ -31,7 +32,9 @@ private[mrpc] object Matcher:
    * is passed in (summoned once at the entry point via [[summonDone]]), not re-summoned here.
    */
   def planAll[T: Type](done: Expr[Done.Of[T]], names: Expr[RpcNames[T]])(using Quotes): Type[? <: Tuple] =
-    val ops = operationTypes(done)
+    val ops = done match
+      case '{ type operations <: Tuple; $_ : { type Operations = operations } } =>
+        TupleTraverse.traverseTuple[operations, DoneOperation]
     // Names come from the single authority `RpcNames[T]` (type-level `Names`, read back by `namesOf`).
     // `namesOf` falls back to a direct `computeAll` when the mirror can't be summoned, so the
     // duplicate-name abort still surfaces verbatim (see CompileErrorSuite).
@@ -45,9 +48,9 @@ private[mrpc] object Matcher:
    * iterate over — each queried on demand via local quote-pattern reads on the plan's `Type[?]`, same
    * as [[operationTypes]]'s list of `DoneOperation` types is queried via [[OpReflect]].
    */
-  def plans[T: Type](done: Expr[Done.Of[T]], names: Expr[RpcNames[T]])(using Quotes): List[Type[?]] =
+  def plans[T: Type](done: Expr[Done.Of[T]], names: Expr[RpcNames[T]])(using Quotes): List[Type[? <: OpPlan]] =
     planAll[T](done, names) match
-      case '[type ps <: Tuple; ps] => TupleTraverse.traverseTuple(Type.of[ps])
+      case '[type ps <: Tuple; ps] => TupleTraverse.traverseTuple[ps, OpPlan]
 
   /**
    * Exposes a SINGLE operation's [[OpPlan]] type directly to the CALLER's type checker —
@@ -64,7 +67,9 @@ private[mrpc] object Matcher:
   private def planForImpl[T: Type, L: Type](done: Expr[Done.Of[T]], names: Expr[RpcNames[T]])(using Quotes)
     : Expr[OpPlan] =
     import quotes.reflect.*
-    val ops = operationTypes(done)
+    val ops = done match
+      case '{ type operations <: Tuple; $_ : { type Operations = operations } } =>
+        TupleTraverse.traverseTuple[operations, DoneOperation]
     val resolvedNames = RpcNames.namesOf[T](names)
     val label = Type.valueOfConstant[L].getOrElse(report.errorAndAbort("L must be a literal string")).toString
     val idx = ops.indexWhere(op => OpReflect.labelOf(op) == label)
@@ -87,7 +92,9 @@ private[mrpc] object Matcher:
   private def plansForImpl[T: Type, L: Type](done: Expr[Done.Of[T]], names: Expr[RpcNames[T]])(using Quotes)
     : Expr[Tuple] =
     import quotes.reflect.*
-    val ops = operationTypes(done)
+    val ops = done match
+      case '{ type operations <: Tuple; $_ : { type Operations = operations } } =>
+        TupleTraverse.traverseTuple[operations, DoneOperation]
     val resolvedNames = RpcNames.namesOf[T](names)
     val label = Type.valueOfConstant[L].getOrElse(report.errorAndAbort("L must be a literal string")).toString
     val matches = ops.zip(resolvedNames).filter((op, _) => OpReflect.labelOf(op) == label)
@@ -97,35 +104,24 @@ private[mrpc] object Matcher:
     }
     Expr.ofRefinedTuple(nulls)
 
-  /** Extracts the refined `DoneOperation` element types from the (passed-in) mirror's `Operations`. */
-  private[mrpc] def operationTypes[T: Type](doneExpr: Expr[Done.Of[T]])(using Quotes): List[Type[?]] =
-    import quotes.reflect.*
-    val doneTpe = doneExpr.asTerm.tpe.widen
-    val operationsTpe = doneTpe.select(doneTpe.typeSymbol.typeMember("Operations")).dealias
-    operationsTpe.asType match
-      case '[type ops <: Tuple; ops] => TupleTraverse.traverseTuple(Type.of[ops])
-      case _ => report.errorAndAbort("Done.Operations is not a tuple")
-
   /** Classifies a single operation type into a refined [[OpPlan]] type using its resolved rpcName. */
-  private def planOne(opAndName: (Type[?], String))(using Quotes): Type[?] =
+  private def planOne(opAndName: (Type[?], Type[? <: String]))(using Quotes): Type[?] =
     import quotes.reflect.*
     val (opType, rpcName) = opAndName
-    val arityType: Type[? <: ArityTag] = arityOf(OpReflect.outputType(opType))
-    val paramTypes: List[Type[?]] = OpReflect.inputElems(opType).map(planParam)
-    val paramsType: Type[? <: Tuple] = TupleTraverse.foldTuple(paramTypes)
-
-    // `labelType` relays the op's EXISTING `Label` type directly; `rpcName` has no pre-existing type
-    // to relay — it's a value computed by `RpcName.computeAll` — so it genuinely needs lifting via
-    // `ConstantType(StringConstant(...))`.
-    val labelType = opType.runtimeChecked match
-      case '[type l <: String; { type Label = l }] => Type.of[l]
+    val arityType = opType match
+      case '[{ type OutputType = Unit }] => Type.of[ArityTag.Fire]
+      case '[{ type OutputType = Future[x] }] => Type.of[ArityTag.CallOf[x]]
+      case '[{ type OutputType = other }] => Type.of[ArityTag.GetOf[other]]
+    val paramsType: Type[? <: Tuple] = TupleTraverse.foldTuple(opType match
+      case '[type elems <: Tuple; DoneOperation { type InputElems = elems }] =>
+        TupleTraverse.traverseTuple[elems, InputElem].map(paramOf).map(planParam))
 
     // Under the fixed-RawRpc model the result is always encoded via the summoned leaf bridge unless
     // it is itself Raw; @verbatim on a non-Raw result has no identity to land on. Result-verbatim is
     // therefore only reachable through the same Raw-type check params use; v1 fixtures encode results.
-    (labelType, ConstantType(StringConstant(rpcName)).asType, arityType, paramsType, opType) match
+    (opType, rpcName, arityType, paramsType, opType) match
       case (
-            '[type l <: String; l],
+            '[type l <: String; { type Label = l }],
             '[type n <: String; n],
             '[type a <: ArityTag; a],
             '[type ps <: Tuple; ps],
@@ -144,17 +140,6 @@ private[mrpc] object Matcher:
       case _ => report.errorAndAbort(s"could not build OpPlan for operation ${TypeRepr.of(using opType).show}")
 
   /**
-   * Arity from the output type. `Unit` -> fire; `Future[X]` -> call carrying `X`; anything else is
-   * treated as a sub-RPC getter seam (recursion deferred). The unsupported-result-type compile error
-   * fires at the materialize site where a sub-RPC conversion cannot be summoned (see CompileErrorSuite).
-   */
-  private def arityOf(output: Type[?])(using Quotes): Type[? <: ArityTag] =
-    output match
-      case '[Unit] => Type.of[ArityTag.Fire]
-      case '[Future[x]] => Type.of[ArityTag.CallOf[x]]
-      case '[other] => Type.of[ArityTag.GetOf[other]]
-
-  /**
    * Per-param encode-vs-verbatim plan. Documented mrpc divergence from commons: commons makes
    * `@single`/`@optional` params verbatim by default because its raw type is concrete and often
    * equals the param type. mrpc keeps `Raw` abstract, so the only way a value reaches `Raw` is the
@@ -164,15 +149,12 @@ private[mrpc] object Matcher:
    * gated on `@verbatim` being present AND the param type being an abstract/opaque carrier; in the
    * fixed-String fixtures no param is `Raw`, so this resolves to `Encoded`, matching the divergence.
    */
-  private def planParam(param: Type[?])(using Quotes): Type[?] =
-    val paramType = param.runtimeChecked match
-      case '[Param { type ParamType = t }] => Type.of[t]
-    val encodingType: Type[? <: EncodingTag] =
-      if OpReflect.paramHasVerbatim(param) && OpReflect.isRawCarrier(paramType) then Type.of[EncodingTag.Verbatim]
-      else Type.of[EncodingTag.Encoded]
-    val labelType = param.runtimeChecked match
-      case '[type l <: String; { type Label = l }] => Type.of[l]
-    (labelType, paramType, encodingType) match
-      case ('[type l <: String; l], '[t], '[type e <: EncodingTag; e]) =>
-        Type.of[ParamPlan { type Label = l; type ParamType = t; type Encoding = e }]
-      case _ => quotes.reflect.report.errorAndAbort(s"could not build ParamPlan for param")
+  private def planParam(param: Type[?])(using Quotes): Type[?] = param match
+    case '[Param { type ParamType = t }] =>
+      val encodingType: Type[? <: EncodingTag] =
+        if OpReflect.paramHasVerbatim(param) && OpReflect.isRawCarrier[t] then Type.of[EncodingTag.Verbatim]
+        else Type.of[EncodingTag.Encoded]
+      (param, encodingType) match
+        case ('[type l <: String; { type Label = l }], '[type e <: EncodingTag; e]) =>
+          Type.of[ParamPlan { type Label = l; type ParamType = t; type Encoding = e }]
+        case _ => quotes.reflect.report.errorAndAbort(s"could not build ParamPlan for param")

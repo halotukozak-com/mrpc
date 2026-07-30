@@ -1,10 +1,10 @@
 package mrpc.derive
 
+import made.Done
+
 import scala.concurrent.duration.Duration
 import scala.concurrent.{Await, ExecutionContext, Future}
-
 import mcodec.Json
-
 import mrpc.conv.AsRaw
 import mrpc.derive.SampleApi.*
 import mrpc.raw.{RawInvocation, RawRpc}

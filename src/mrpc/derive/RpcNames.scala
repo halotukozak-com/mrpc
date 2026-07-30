@@ -1,6 +1,7 @@
 package mrpc.derive
 
-import made.Done
+import made.{Done, DoneOperation, InputElem}
+import mrpc.derive.OpReflect.paramOf
 
 import scala.quoted.*
 
@@ -31,21 +32,16 @@ object RpcNames:
    * metadata): the type-level names lowered to values, rather than each caller re-running
    * `RpcName.computeAll`. The mirror is summoned once via [[summonNames]] and threaded in.
    */
-  private[derive] def namesOf[T: Type](rpcNames: Expr[RpcNames[T]])(using Quotes): List[String] =
+  private[derive] def namesOf[T: Type](rpcNames: Expr[RpcNames[T]])(using Quotes): List[Type[? <: String]] =
     rpcNames.runtimeChecked match
-      case '{ $_ : RpcNames[T] { type Names = ns } } => constNames[ns]
-
-  /** Lowers a tuple of singleton-string types to their `String` values via `Type.valueOfConstant`. */
-  private def constNames[Ns: Type](using Quotes): List[String] =
-    Type.of[Ns] match
-      case '[EmptyTuple] => Nil
-      case '[h *: t] =>
-        Type.valueOfConstant[h].get.toString :: constNames[t]
-      case _ => quotes.reflect.report.errorAndAbort("RpcNames.Names is not a fully-known tuple")
+      case '{ type ns <: Tuple; $_ : RpcNames[T] { type Names = ns } } => TupleTraverse.traverseTuple[ns, String]
 
   private def deriveImpl[T: Type](done: Expr[Done.Of[T]])(using Quotes): Expr[RpcNames[T]] =
     import quotes.reflect.*
-    val ops = Matcher.operationTypes[T](done)
+    val ops = done match
+      case '{ type operations <: Tuple; $_ : { type Operations = operations } } =>
+        TupleTraverse.traverseTuple[operations, DoneOperation]
+
     val bases = ops.map(baseName)
 
     // Group by base name to detect overloads: a base shared by >1 op is an overloaded set.
@@ -99,15 +95,14 @@ object RpcNames:
    * signatures yield distinct suffixes; reordering the overloads does not change any one suffix.
    */
   private def overloadSuffix(op: Type[?])(using Quotes): String =
-    import quotes.reflect.*
-    val sig = OpReflect
-      .inputElems(op)
-      .map { p =>
-        val paramType = p.runtimeChecked match
-          case '[Param { type ParamType = t }] => Type.of[t]
-        TypeRepr.of(using paramType).show
-      }
-      .mkString("(", ",", ")")
+    val sig = op match
+      case '[type elems <: Tuple; DoneOperation { type InputElems = elems }] =>
+        TupleTraverse
+          .traverseTuple[elems, InputElem]
+          .map(paramOf)
+          .map:
+            case '[Param { type ParamType = t }] => Type.show[t]
+          .mkString("(", ",", ")")
     val hash = sig.hashCode & 0x7fffffff
     s"_${hash.toHexString}"
 
