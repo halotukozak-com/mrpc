@@ -97,7 +97,7 @@ object RpcName:
     import quotes.reflect.*
     val sig = OpReflect
       .inputElems(op)
-      .map(p => TypeRepr.of(using p.tpe).show)
+      .map(p => TypeRepr.of(using OpReflect.paramTypeOf(p)).show)
       .mkString("(", ",", ")")
     val hash = sig.hashCode & 0x7fffffff
     s"_${hash.toHexString}"

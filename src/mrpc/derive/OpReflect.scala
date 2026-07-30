@@ -3,8 +3,22 @@ package mrpc.derive
 import scala.quoted.*
 
 /**
+ * One parameter's label, declared type, and raw per-param `Metadata` — a refined `Param` type,
+ * mirroring made's own `InputElem` shape, rather than a value: [[OpReflect.inputElems]] never leaves
+ * this package other than to feed [[Matcher]]/[[MetadataDerivation]]'s own macro-time classification,
+ * so it never needs to exist as a runtime value. Read back via the accessors in [[OpReflect]]
+ * (`labelOf`/`paramTypeOf`/`metadataEntries`/`paramHasVerbatim`), same as [[OpPlan]] is read back via
+ * [[PlanReflect]].
+ */
+private[mrpc] sealed trait Param:
+  type Label <: String
+  type ParamType
+  type Metadata <: Tuple
+
+/**
  * Reflection helpers that read the type-level members of a refined `DoneOperation` (and its
- * `InputElem`s) — `Label`, `OutputType`, `InputElems`, and the method/param `Metadata` chains.
+ * `InputElem`s, projected into [[Param]]) — `Label`, `OutputType`, `InputElems`, and the method/param
+ * `Metadata` chains.
  *
  * Annotation reading mirrors made's `getAnnotationImpl` (extensions.scala): each `MetaAnnotation` is
  * captured in the `Metadata` tuple as an `AnnotatedType(Meta, annot)`, so a `<:<` match over the
@@ -15,25 +29,20 @@ import scala.quoted.*
  */
 private[mrpc] object OpReflect:
 
-  /**
-   * A single parameter: its label, declared type, the raw per-param `Metadata` entries (each an
-   * `AnnotatedType(Meta, annot)`), and the derived `hasVerbatim` fact. `metadataEntries` is threaded
-   * from the same `paramOf` traversal that computes `hasVerbatim`, so the metadata materializer can
-   * reify per-param annotations without a second walk.
-   */
-  final case class Param(
-    label: String,
-    tpe: Type[?],
-    metadataEntries: List[Type[?]],
-    hasVerbatim: Boolean,
-  )
-
-  /** The op's `Label` singleton-string member as a plain `String`. */
+  /** The op's (or param's) `Label` singleton-string member as a plain `String`. */
   def labelOf(opType: Type[?])(using Quotes): String =
     import quotes.reflect.*
     memberType(opType, "Label") match
       case ConstantType(StringConstant(s)) => s
-      case other => report.errorAndAbort(s"operation Label is not a string literal: ${other.show}")
+      case other => report.errorAndAbort(s"Label is not a string literal: ${other.show}")
+
+  /** The param's `ParamType` member — its declared parameter type. */
+  def paramTypeOf(paramType: Type[?])(using Quotes): Type[?] =
+    memberType(paramType, "ParamType").asType
+
+  /** `true` when the param carries a `@verbatim` annotation. */
+  def paramHasVerbatim(paramType: Type[?])(using Quotes): Boolean =
+    metadataEntries(paramType).exists(isAnnotation[mrpc.annotation.verbatim])
 
   /** The op's `OutputType` member as a `Type`. */
   def outputType(opType: Type[?])(using Quotes): Type[?] =
@@ -59,15 +68,15 @@ private[mrpc] object OpReflect:
         }
       case _ => report.errorAndAbort("ParamLists is not a tuple")
 
-  /** The op's flattened `InputElems`, each projected into a [[Param]]. */
-  def inputElems(opType: Type[?])(using Quotes): List[Param] =
+  /** The op's flattened `InputElems`, each projected into a refined [[Param]] type. */
+  def inputElems(opType: Type[?])(using Quotes): List[Type[? <: Param]] =
     import quotes.reflect.*
     memberType(opType, "InputElems").asType match
       case '[type elems <: Tuple; elems] =>
         TupleTraverse.traverseTuple(Type.of[elems]).map(paramOf)
       case _ => report.errorAndAbort("InputElems is not a tuple")
 
-  /** The op's method-level `Metadata` tuple entries as types (each an `AnnotatedType(Meta, annot)`). */
+  /** The op's (or param's) `Metadata` tuple entries as types (each an `AnnotatedType(Meta, annot)`). */
   def metadataEntries(opType: Type[?])(using Quotes): List[Type[?]] =
     memberType(opType, "Metadata").asType match
       case '[type meta <: Tuple; meta] => TupleTraverse.traverseTuple(Type.of[meta])
@@ -105,17 +114,16 @@ private[mrpc] object OpReflect:
     val member = repr.typeSymbol.typeMember(name)
     repr.select(member).dealias
 
-  private def paramOf(elemType: Type[?])(using Quotes): Param =
+  private def paramOf(elemType: Type[?])(using Quotes): Type[? <: Param] =
     import quotes.reflect.*
     val repr = TypeRepr.of(using elemType)
-    val tpe = repr.select(repr.typeSymbol.typeMember("Type")).dealias.asType
-    val label = repr.select(repr.typeSymbol.typeMember("Label")).dealias match
-      case ConstantType(StringConstant(s)) => s
-      case _ => ""
-    val metaEntries = repr.select(repr.typeSymbol.typeMember("Metadata")).dealias.asType match
-      case '[type meta <: Tuple; meta] => TupleTraverse.traverseTuple(Type.of[meta])
-      case _ => Nil
-    Param(label, tpe, metaEntries, metaEntries.exists(isAnnotation[mrpc.annotation.verbatim]))
+    val labelType = repr.select(repr.typeSymbol.typeMember("Label")).dealias.asType
+    val paramTypeType = repr.select(repr.typeSymbol.typeMember("Type")).dealias.asType
+    val metaType = repr.select(repr.typeSymbol.typeMember("Metadata")).dealias.asType
+    (labelType, paramTypeType, metaType) match
+      case ('[type l <: String; l], '[t], '[type m <: Tuple; m]) =>
+        Type.of[Param { type Label = l; type ParamType = t; type Metadata = m }]
+      case _ => report.errorAndAbort(s"could not build Param for ${repr.show}")
 
   /** Locates an annotation term of type `A` in the op's `Metadata`, like made's `getAnnotationImpl`. */
   private def findAnnotation[A: Type](using q: Quotes)(opType: Type[?]): Option[q.reflect.Term] =

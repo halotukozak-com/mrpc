@@ -47,8 +47,8 @@ private[mrpc] object MetadataDerivation:
     /** A single RPC method/op (its refined `DoneOperation` type + resolved rpcName). */
     case Method(opType: Type[?], resolvedName: String)
 
-    /** A single RPC parameter. */
-    case Param(param: OpReflect.Param)
+    /** A single RPC parameter (a refined [[OpReflect.Param]] type). */
+    case Param(param: Type[? <: mrpc.derive.Param])
 
   def impl[M[_]: Type, Real: Type](using Quotes): Expr[M[Real]] =
     import quotes.reflect.*
@@ -166,7 +166,7 @@ private[mrpc] object MetadataDerivation:
       case Context.Method(opType, resolvedName) =>
         if useRaw then resolvedName else OpReflect.labelOf(opType)
       case Context.Param(p) =>
-        p.label // params have no resolved-name distinction; label is the name either way
+        OpReflect.labelOf(p) // params have no resolved-name distinction; label is the name either way
       case Context.Trait(_, _) =>
         report.errorAndAbort("@reifyName is not valid at the trait level (no single name)")
 
@@ -185,7 +185,7 @@ private[mrpc] object MetadataDerivation:
 
     val entries: List[Type[?]] = ctx match
       case Context.Method(opType, _) => OpReflect.metadataEntries(opType)
-      case Context.Param(p) => p.metadataEntries
+      case Context.Param(p) => OpReflect.metadataEntries(p)
       case Context.Trait(_, _) =>
         report.errorAndAbort("@reifyAnnot is not valid at the trait level")
 
@@ -299,15 +299,15 @@ private[mrpc] object MetadataDerivation:
       case Context.Method(o, _) => o
       case _ => report.errorAndAbort("@rpcParamMetadata is only valid within a method context")
 
-    val items: List[OpReflect.Param] = OpReflect.inputElems(opType)
+    val items: List[Type[? <: Param]] = OpReflect.inputElems(opType)
     collectionSlot(
       param,
       paramTpe,
       arity,
       "@rpcParamMetadata",
       items,
-      key = p => p.label,
-      elem = (elemTpe, p) => buildValue(specialize(elemTpe, p.tpe), Context.Param(p)),
+      key = p => OpReflect.labelOf(p),
+      elem = (elemTpe, p) => buildValue(specialize(elemTpe, OpReflect.paramTypeOf(p)), Context.Param(p)),
     )
 
   /**

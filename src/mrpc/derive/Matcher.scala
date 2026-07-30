@@ -183,12 +183,13 @@ private[mrpc] object Matcher:
    * gated on `@verbatim` being present AND the param type being an abstract/opaque carrier; in the
    * fixed-String fixtures no param is `Raw`, so this resolves to `Encoded`, matching the divergence.
    */
-  private def planParam(param: OpReflect.Param)(using Quotes): Type[?] =
+  private def planParam(param: Type[?])(using Quotes): Type[?] =
     import quotes.reflect.*
+    val paramType = OpReflect.paramTypeOf(param)
     val encodingType: Type[? <: EncodingTag] =
-      if param.hasVerbatim && OpReflect.isRawCarrier(param.tpe) then Type.of[EncodingTag.Verbatim]
+      if OpReflect.paramHasVerbatim(param) && OpReflect.isRawCarrier(paramType) then Type.of[EncodingTag.Verbatim]
       else Type.of[EncodingTag.Encoded]
-    (ConstantType(StringConstant(param.label)).asType, param.tpe, encodingType) match
+    (ConstantType(StringConstant(OpReflect.labelOf(param))).asType, paramType, encodingType) match
       case ('[type l <: String; l], '[t], '[type e <: EncodingTag; e]) =>
         Type.of[ParamPlan { type Label = l; type ParamType = t; type Encoding = e }]
-      case _ => report.errorAndAbort(s"could not build ParamPlan for param '${param.label}'")
+      case _ => report.errorAndAbort(s"could not build ParamPlan for param")
