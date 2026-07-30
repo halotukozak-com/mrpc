@@ -38,8 +38,11 @@ object AsRealDerivation:
    * Macro entry: build the `Real` client proxy for a single `RawRpc[Raw]`. The mirror and
    * `ExecutionContext` are summoned here and handed to [[materializeProxyImpl]].
    */
-  inline def materializeProxy[Raw, Real: Done.Of](raw: RawRpc[Raw])(using ExecutionContext): Real =
-    ${ materializeProxyImpl[Raw, Real]('raw, 'summon, 'summon) }
+  inline def materializeProxy[Raw, Real: {Done.Of as done, RpcNames as names}](
+    raw: RawRpc[Raw],
+  )(using ec: ExecutionContext,
+  ): Real =
+    ${ materializeProxyImpl[Raw, Real]('raw, 'done, 'names, 'ec) }
 
   /**
    * Builds the proxy via made's `Done.materialize`: one handler per plan — shaped to match made's
@@ -63,10 +66,11 @@ object AsRealDerivation:
   private def materializeProxyImpl[Raw: Type, Real: Type](
     raw: Expr[RawRpc[Raw]],
     done: Expr[Done.Of[Real]],
+    names: Expr[RpcNames[Real]],
     ec: Expr[ExecutionContext],
   )(using Quotes,
   ): Expr[Real] =
-    val plans = Matcher.plans[Real](done)
+    val plans = Matcher.plans[Real](done, names)
     val handlers: List[Expr[Any]] = plans.map(plan => handlerFor[Raw](raw, plan, ec))
     // `ofRefinedTuple` keeps each handler's own precise type through the fold, so pattern-matching its
     // result back to a bound type `hs` (rather than stashing it in a `val: Expr[Tuple]`, which would
@@ -103,8 +107,7 @@ object AsRealDerivation:
     ec: Expr[ExecutionContext],
   )(using Quotes,
   ): Expr[?] =
-    if paramsOf(plan).isEmpty then
-      '{ () => ${ handlerBody[Raw, EmptyTuple]('{ EmptyTuple }, plan, raw, ec) } }
+    if paramsOf(plan).isEmpty then '{ () => ${ handlerBody[Raw, EmptyTuple]('{ EmptyTuple }, plan, raw, ec) } }
     else
       // No bound (`<: Product`/`<: Tuple`) on `argsT` here: a `NamedTuple` built from these
       // quote-pattern-bound (skolem) `n`/`v` type variables fails such bound checks in a quote
@@ -130,7 +133,9 @@ object AsRealDerivation:
 
   /** One parameter's label + declared type, read off `plan`'s `Params` tuple, in order. */
   private def paramsOf(plan: Type[?])(using Quotes): List[(label: String, paramType: Type[?])] =
-    (plan.runtimeChecked match { case '[OpPlan { type Params = ps }] => Type.of[ps] }) match
+    (plan.runtimeChecked match
+      case '[OpPlan { type Params = ps }] => Type.of[ps]
+    ) match
       case '[type pst <: Tuple; pst] =>
         TupleTraverse.traverseTuple(Type.of[pst]).map { pt =>
           pt.runtimeChecked match

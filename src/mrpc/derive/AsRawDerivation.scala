@@ -36,7 +36,7 @@ object AsRawDerivation:
    * by [[buildRawRpc]]. The `AsRaw` wrapper is ordinary Scala (a SAM lambda); only the `RawRpc` itself
    * — its arity-partitioned `fire`/`call`/`get` dispatch — is generated.
    */
-  inline def impl[Raw, Real](using Done.Of[Real], ExecutionContext): AsRaw[RawRpc[Raw], Real] =
+  inline def impl[Raw, Real: Done.Of](using ExecutionContext): AsRaw[RawRpc[Raw], Real] =
     (api: Real) => buildRawRpc[Raw, Real](api)
 
   /**
@@ -51,12 +51,11 @@ object AsRawDerivation:
    * non-`inline` method) rather than writing `new RawRpc[Raw]: ...` directly in this `inline` body —
    * an anonymous class defined inside an `inline def` is otherwise recompiled at every inline site.
    */
-  inline def buildRawRpc[Raw, Real](api: Real)(using Done.Of[Real], ExecutionContext): RawRpc[Raw] =
-    mkRawRpc[Raw](
-      invocation => fireDispatch[Raw, Real](api, invocation),
-      invocation => callDispatch[Raw, Real](api, invocation),
-      invocation => getDispatch[Raw, Real](api, invocation),
-    )
+  inline def buildRawRpc[Raw, Real: Done.Of](api: Real)(using ExecutionContext): RawRpc[Raw] = mkRawRpc[Raw](
+    invocation => fireDispatch[Raw, Real](api, invocation),
+    invocation => callDispatch[Raw, Real](api, invocation),
+    invocation => getDispatch[Raw, Real](api, invocation),
+  )
 
   private def mkRawRpc[Raw](
     fireFn: RawInvocation[Raw] => Unit,
@@ -69,54 +68,60 @@ object AsRawDerivation:
       def get(invocation: RawInvocation[Raw]): RawRpc[Raw] = getFn(invocation)
 
   /** Macro entry for the `fire` arity: dispatches `invocation` to `api`'s matching fire-arity op. */
-  inline def fireDispatch[Raw, Real](api: Real, invocation: RawInvocation[Raw])(using Done.Of[Real]): Unit =
-    ${ fireDispatchImpl[Raw, Real]('api, 'invocation, 'summon) }
+  inline def fireDispatch[Raw, Real: {Done.Of as done, RpcNames as names}](api: Real, invocation: RawInvocation[Raw])
+    : Unit =
+    ${ fireDispatchImpl[Raw, Real]('api, 'invocation, 'done, 'names) }
 
   /**
    * Macro entry for the `call` arity. `ExecutionContext` is in scope so the result can compose
    * `AsRaw[Future[Raw], Future[r]]` via `forFuture`.
    */
-  inline def callDispatch[Raw, Real](
+  inline def callDispatch[Raw, Real: {Done.Of as done, RpcNames as names}](
     api: Real,
     invocation: RawInvocation[Raw],
-  )(using
-    Done.Of[Real],
-    ExecutionContext,
+  )(using ec: ExecutionContext,
   ): Future[Raw] =
-    ${ callDispatchImpl[Raw, Real]('api, 'invocation, 'summon, 'summon) }
+    ${ callDispatchImpl[Raw, Real]('api, 'invocation, 'done, 'names, 'ec) }
 
   /** Macro entry for the `get` arity (sub-RPC getters). */
-  inline def getDispatch[Raw, Real](api: Real, invocation: RawInvocation[Raw])(using Done.Of[Real]): RawRpc[Raw] =
-    ${ getDispatchImpl[Raw, Real]('api, 'invocation, 'summon) }
+  inline def getDispatch[Raw, Real: {Done.Of as done, RpcNames as names}](
+    api: Real,
+    invocation: RawInvocation[Raw],
+  )(using Done.Of[Real],
+  ): RawRpc[Raw] =
+    ${ getDispatchImpl[Raw, Real]('api, 'invocation, 'done, 'names) }
 
   private def fireDispatchImpl[Raw: Type, Real: Type](
     api: Expr[Real],
     inv: Expr[RawInvocation[Raw]],
     done: Expr[Done.Of[Real]],
+    names: Expr[RpcNames[Real]],
   )(using Quotes,
   ): Expr[Unit] =
-    fireBody[Raw, Real](api, inv, planPairs[Real](done), done)
+    fireBody[Raw, Real](api, inv, planPairs[Real](done, names), done)
 
   private def callDispatchImpl[Raw: Type, Real: Type](
     api: Expr[Real],
     inv: Expr[RawInvocation[Raw]],
     done: Expr[Done.Of[Real]],
+    names: Expr[RpcNames[Real]],
     ec: Expr[ExecutionContext],
   )(using Quotes,
   ): Expr[Future[Raw]] =
-    callBody[Raw, Real](api, inv, planPairs[Real](done), ec, done)
+    callBody[Raw, Real](api, inv, planPairs[Real](done, names), ec, done)
 
   private def getDispatchImpl[Raw: Type, Real: Type](
     api: Expr[Real],
     inv: Expr[RawInvocation[Raw]],
     done: Expr[Done.Of[Real]],
+    names: Expr[RpcNames[Real]],
   )(using Quotes,
   ): Expr[RawRpc[Raw]] =
-    getBody[Raw, Real](api, inv, planPairs[Real](done), done)
+    getBody[Raw, Real](api, inv, planPairs[Real](done, names), done)
 
   /** Classifies `Real`'s operations into [[Plan]]s, indexed by position in `Done.Operations`. */
-  private def planPairs[Real: Type](done: Expr[Done.Of[Real]])(using Quotes): List[Plan] =
-    Matcher.plans[Real](done).zipWithIndex.map((t, i) => (opType = t, index = i))
+  private def planPairs[Real: Type](done: Expr[Done.Of[Real]], names: Expr[RpcNames[Real]])(using Quotes): List[Plan] =
+    Matcher.plans[Real](done, names).zipWithIndex.map((t, i) => (opType = t, index = i))
 
   // --- arity-partitioned dispatch bodies ---
 
@@ -219,10 +224,8 @@ object AsRawDerivation:
     val scrutinee = '{ ${ inv }.rpcName }.asTerm
     val caseDefs = plans.map { plan =>
       val rpcName = plan.opType.runtimeChecked match
-        case '[OpPlan { type RpcName = n }] =>
-          Type.of[n] match
-            case '[type nn <: String; nn] =>
-              Type.valueOfConstant[nn].getOrElse(report.errorAndAbort("RpcName is not a string literal")).toString
+        case '[type n <: String; OpPlan { type RpcName = n }] =>
+          Type.valueOfConstant[n].getOrElse(report.errorAndAbort("RpcName is not a string literal")).toString
       CaseDef(Literal(StringConstant(rpcName)), None, arm(plan).asTerm)
     }
     val default = CaseDef(Wildcard(), None, reject.asTerm)
@@ -235,7 +238,9 @@ object AsRawDerivation:
 
   /** Each parameter's declared `ParamType`, in the op's declaration order, off `plan`'s `Params`. */
   private def paramTypesOf(plan: Type[?])(using Quotes): List[Type[?]] =
-    (plan.runtimeChecked match { case '[OpPlan { type Params = ps }] => Type.of[ps] }) match
+    (plan.runtimeChecked match
+      case '[OpPlan { type Params = ps }] => Type.of[ps]
+    ) match
       case '[type pst <: Tuple; pst] =>
         TupleTraverse.traverseTuple(Type.of[pst]).map { pt =>
           pt.runtimeChecked match

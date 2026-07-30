@@ -63,8 +63,11 @@ private[mrpc] object OpReflect:
       case '[type lists <: Tuple; DoneOperation { type ParamLists = lists }] =>
         TupleTraverse.traverseTuple(Type.of[lists]).map {
           case '[type n <: Int; n] =>
-            Type.valueOfConstant[n].getOrElse(quotes.reflect.report.errorAndAbort("ParamLists entry is not an Int literal"))
-          case other => quotes.reflect.report.errorAndAbort(s"ParamLists entry is not an Int literal: ${Type.show(using other)}")
+            Type
+              .valueOfConstant[n]
+              .getOrElse(quotes.reflect.report.errorAndAbort("ParamLists entry is not an Int literal"))
+          case other =>
+            quotes.reflect.report.errorAndAbort(s"ParamLists entry is not an Int literal: ${Type.show(using other)}")
         }
       case _ => quotes.reflect.report.errorAndAbort(s"no ParamLists member on ${Type.show(using opType)}")
 

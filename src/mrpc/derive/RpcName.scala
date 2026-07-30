@@ -1,5 +1,7 @@
 package mrpc.derive
 
+import made.Done
+
 import scala.quoted.*
 
 /**
@@ -26,7 +28,7 @@ object RpcName:
     val outerTpe = opTpe.select(opTpe.typeSymbol.typeMember("OuterType")).dealias
     val nm: String = outerTpe.asType match
       case '[real] =>
-        val done = Matcher.summonDone[real]
+        val done = Expr.summon[Done.Of[real]].get
         val siblings = Matcher.operationTypes[real](done)
         resolveOne(Type.of[Op], siblings)
       case _ => report.errorAndAbort(s"cannot read OuterType of ${opTpe.show}")

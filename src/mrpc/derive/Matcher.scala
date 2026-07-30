@@ -1,9 +1,9 @@
 package mrpc.derive
 
+import made.Done
+
 import scala.concurrent.Future
 import scala.quoted.*
-
-import made.Done
 
 /**
  * Pure compile-time classification of each `DoneOperation` into an [[OpPlan]]: arity (from the
@@ -24,29 +24,18 @@ import made.Done
 private[mrpc] object Matcher:
 
   /**
-   * Summons the `Done.Of[T]` mirror ONCE. Callers thread the result into [[planAll]] /
-   * [[operationTypes]] instead of re-summoning — the server path in particular needs the same mirror
-   * both for classification and for `Done.invoke`, so a single summon avoids deriving it twice.
-   */
-  def summonDone[T: Type](using Quotes): Expr[Done.Of[T]] =
-    import quotes.reflect.*
-    Expr.summon[Done.Of[T]].getOrElse {
-      report.errorAndAbort(s"could not summon a Done mirror for ${TypeRepr.of[T].show}")
-    }
-
-  /**
    * Classifies every operation of `T` into an [[OpPlan]] and folds the results into a `Plans <:
    * Tuple` type — one [[OpPlan]] per `Done.Operations` entry, in the same order — mirroring how
    * `Done` itself models `T` as a `Tuple` of `DoneOperation`s. rpcName resolution (incl. overload
    * disambiguation + duplicate detection) is delegated to [[RpcName.computeAll]]. The `Done` mirror
    * is passed in (summoned once at the entry point via [[summonDone]]), not re-summoned here.
    */
-  def planAll[T: Type](done: Expr[Done.Of[T]])(using Quotes): Type[? <: Tuple] =
+  def planAll[T: Type](done: Expr[Done.Of[T]], names: Expr[RpcNames[T]])(using Quotes): Type[? <: Tuple] =
     val ops = operationTypes(done)
     // Names come from the single authority `RpcNames[T]` (type-level `Names`, read back by `namesOf`).
     // `namesOf` falls back to a direct `computeAll` when the mirror can't be summoned, so the
     // duplicate-name abort still surfaces verbatim (see CompileErrorSuite).
-    val resolvedNames = RpcNames.namesOf[T](RpcNames.summonNames[T])
+    val resolvedNames = RpcNames.namesOf[T](names)
     val planTypes: List[Type[?]] = ops.zip(resolvedNames).map(planOne)
     TupleTraverse.foldTuple(planTypes)
 
@@ -56,8 +45,8 @@ private[mrpc] object Matcher:
    * iterate over — each queried on demand via local quote-pattern reads on the plan's `Type[?]`, same
    * as [[operationTypes]]'s list of `DoneOperation` types is queried via [[OpReflect]].
    */
-  def plans[T: Type](done: Expr[Done.Of[T]])(using Quotes): List[Type[?]] =
-    planAll[T](done) match
+  def plans[T: Type](done: Expr[Done.Of[T]], names: Expr[RpcNames[T]])(using Quotes): List[Type[?]] =
+    planAll[T](done, names) match
       case '[type ps <: Tuple; ps] => TupleTraverse.traverseTuple(Type.of[ps])
 
   /**
@@ -69,13 +58,14 @@ private[mrpc] object Matcher:
    * `null` dummy: nothing here is ever meant to be called/dereferenced at runtime, only its STATIC
    * type — a plain type projection — is used.
    */
-  transparent inline def planFor[T, L <: String]: OpPlan = ${ planForImpl[T, L] }
+  transparent inline def planFor[T: {Done.Of as done, RpcNames as names}, L <: String]: OpPlan =
+    ${ planForImpl[T, L]('done, 'names) }
 
-  private def planForImpl[T: Type, L: Type](using Quotes): Expr[OpPlan] =
+  private def planForImpl[T: Type, L: Type](done: Expr[Done.Of[T]], names: Expr[RpcNames[T]])(using Quotes)
+    : Expr[OpPlan] =
     import quotes.reflect.*
-    val done = summonDone[T]
     val ops = operationTypes(done)
-    val resolvedNames = RpcNames.namesOf[T](RpcNames.summonNames[T])
+    val resolvedNames = RpcNames.namesOf[T](names)
     val label = Type.valueOfConstant[L].getOrElse(report.errorAndAbort("L must be a literal string")).toString
     val idx = ops.indexWhere(op => OpReflect.labelOf(op) == label)
     if idx < 0 then report.errorAndAbort(s"no operation labeled '$label' in ${TypeRepr.of[T].show}")
@@ -91,18 +81,19 @@ private[mrpc] object Matcher:
    * plansFor[...]`) gives each bound val its OWN precise `OpPlan` type, same as [[planFor]] does for a
    * single operation.
    */
-  transparent inline def plansFor[T, L <: String]: Tuple = ${ plansForImpl[T, L] }
+  transparent inline def plansFor[T: {Done.Of as done, RpcNames as names}, L <: String]: Tuple =
+    ${ plansForImpl[T, L]('done, 'names) }
 
-  private def plansForImpl[T: Type, L: Type](using Quotes): Expr[Tuple] =
+  private def plansForImpl[T: Type, L: Type](done: Expr[Done.Of[T]], names: Expr[RpcNames[T]])(using Quotes)
+    : Expr[Tuple] =
     import quotes.reflect.*
-    val done = summonDone[T]
     val ops = operationTypes(done)
-    val resolvedNames = RpcNames.namesOf[T](RpcNames.summonNames[T])
+    val resolvedNames = RpcNames.namesOf[T](names)
     val label = Type.valueOfConstant[L].getOrElse(report.errorAndAbort("L must be a literal string")).toString
     val matches = ops.zip(resolvedNames).filter((op, _) => OpReflect.labelOf(op) == label)
     if matches.isEmpty then report.errorAndAbort(s"no operation labeled '$label' in ${TypeRepr.of[T].show}")
-    val nulls: List[Expr[Any]] = matches.map(planOne).map {
-      case '[type p <: OpPlan; p] => '{ null.asInstanceOf[p] }
+    val nulls: List[Expr[Any]] = matches.map(planOne).map { case '[type p <: OpPlan; p] =>
+      '{ null.asInstanceOf[p] }
     }
     Expr.ofRefinedTuple(nulls)
 
@@ -140,14 +131,16 @@ private[mrpc] object Matcher:
             '[type ps <: Tuple; ps],
             '[o],
           ) =>
-        Type.of[OpPlan {
-          type Label = l
-          type RpcName = n
-          type ArityInfo = a
-          type Params = ps
-          type ResultEncoding = EncodingTag.Encoded
-          type OpType = o
-        }]
+        Type.of[
+          OpPlan {
+            type Label = l
+            type RpcName = n
+            type ArityInfo = a
+            type Params = ps
+            type ResultEncoding = EncodingTag.Encoded
+            type OpType = o
+          },
+        ]
       case _ => report.errorAndAbort(s"could not build OpPlan for operation ${TypeRepr.of(using opType).show}")
 
   /**

@@ -40,18 +40,24 @@ class MatchingSuite extends munit.FunSuite:
     val combine = Matcher.planFor[SampleApi, "combine"]
     val ping = Matcher.planFor[SampleApi, "ping"]
     // increment(n: Int) -> one encoded param; echoBool(b: Boolean) -> one encoded param.
-    summon[increment.Params =:=
-      (ParamPlan { type Label = "n"; type ParamType = Int; type Encoding = EncodingTag.Encoded } *: EmptyTuple)]
-    summon[echoBool.Params =:= (ParamPlan {
-      type Label = "b"; type ParamType = Boolean; type Encoding = EncodingTag.Encoded
-    } *: EmptyTuple)]
+    summon[
+      increment.Params =:=
+        (ParamPlan { type Label = "n"; type ParamType = Int; type Encoding = EncodingTag.Encoded } *: EmptyTuple),
+    ]
+    summon[
+      echoBool.Params =:=
+        (ParamPlan {
+          type Label = "b"; type ParamType = Boolean; type Encoding = EncodingTag.Encoded
+        } *: EmptyTuple),
+    ]
     // combine(a: Int)(b: String, c: Long) flattens to three encoded params.
-    summon[combine.Params =:= (
-      ParamPlan { type Label = "a"; type ParamType = Int; type Encoding = EncodingTag.Encoded } *:
-        ParamPlan { type Label = "b"; type ParamType = String; type Encoding = EncodingTag.Encoded } *:
-        ParamPlan { type Label = "c"; type ParamType = Long; type Encoding = EncodingTag.Encoded } *:
-        EmptyTuple
-    )]
+    summon[
+      combine.Params =:= (
+        ParamPlan { type Label = "a"; type ParamType = Int; type Encoding = EncodingTag.Encoded } *: ParamPlan {
+          type Label = "b"; type ParamType = String; type Encoding = EncodingTag.Encoded
+        } *: ParamPlan { type Label = "c"; type ParamType = Long; type Encoding = EncodingTag.Encoded } *: EmptyTuple,
+      ),
+    ]
     // ping() has no value params.
     summon[ping.Params =:= EmptyTuple]
 

@@ -1,5 +1,7 @@
 package mrpc.derive
 
+import made.Done
+
 import scala.quoted.*
 
 /**
@@ -19,20 +21,7 @@ sealed trait RpcNames[T]:
   def names: Names
 
 object RpcNames:
-  transparent inline given derived[T]: RpcNames[T] = ${ deriveImpl[T] }
-
-  /**
-   * Summons `RpcNames[T]` once for threading into [[namesOf]]. On summon-failure — which is how a
-   * resolution abort (e.g. a duplicate rpcName) manifests, since `Expr.summon` swallows it into a
-   * non-match — re-runs the resolution directly so that error surfaces verbatim instead of a generic
-   * "could not summon".
-   */
-  private[derive] def summonNames[T: Type](using Quotes): Expr[RpcNames[T]] =
-    import quotes.reflect.*
-    Expr.summon[RpcNames[T]].getOrElse {
-      RpcName.computeAll(Matcher.operationTypes[T](Matcher.summonDone[T]))
-      report.errorAndAbort(s"could not summon RpcNames for ${TypeRepr.of[T].show}")
-    }
+  transparent inline given derived[T: Done.Of as done]: RpcNames[T] = ${ deriveImpl[T]('done) }
 
   /**
    * Reads the resolved names back off `RpcNames[T].Names` (the type-level singletons) as a `List`,
@@ -54,9 +43,8 @@ object RpcNames:
         Type.valueOfConstant[h].get.toString :: constNames[t]
       case _ => quotes.reflect.report.errorAndAbort("RpcNames.Names is not a fully-known tuple")
 
-  private def deriveImpl[T: Type](using Quotes): Expr[RpcNames[T]] =
+  private def deriveImpl[T: Type](done: Expr[Done.Of[T]])(using Quotes): Expr[RpcNames[T]] =
     import quotes.reflect.*
-    val done = Matcher.summonDone[T]
     val resolved: List[String] = RpcName.computeAll(Matcher.operationTypes[T](done))
 
     // Fold the resolved names into a singleton-string tuple type `n1 *: n2 *: ... *: EmptyTuple`.

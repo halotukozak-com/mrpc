@@ -1,4 +1,8 @@
-package mrpc.meta
+package mrpc
+package meta
+
+import made.Done
+import mrpc.derive.RpcNames
 
 /**
  * User-facing metadata entry point, mirroring commons `RpcMetadataCompanion`. A concrete metadata
@@ -21,5 +25,5 @@ package mrpc.meta
  * names so metadata names cannot drift from the engine's.
  */
 trait RpcMetadataCompanion[M[_]]:
-  inline def materialize[Real]: M[Real] =
-    ${ mrpc.derive.MetadataDerivation.impl[M, Real] }
+  inline def materialize[Real: {Done.Of as done, RpcNames as names}]: M[Real] =
+    ${ mrpc.derive.MetadataDerivation.impl[M, Real]('done, 'names) }

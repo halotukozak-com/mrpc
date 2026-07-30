@@ -1,5 +1,7 @@
 package mrpc.derive
 
+import made.Done
+
 import scala.quoted.*
 
 /**
@@ -50,17 +52,17 @@ private[mrpc] object MetadataDerivation:
     /** A single RPC parameter (a refined [[OpReflect.Param]] type). */
     case Param(param: Type[? <: mrpc.derive.Param])
 
-  def impl[M[_]: Type, Real: Type](using Quotes): Expr[M[Real]] =
+  def impl[M[_]: Type, Real: Type](done: Expr[Done.Of[Real]], names: Expr[RpcNames[Real]])(using Quotes)
+    : Expr[M[Real]] =
     import quotes.reflect.*
 
-    val done = Matcher.summonDone[Real]
     val ops: List[Type[?]] = Matcher.operationTypes[Real](done) // refined op types, Done order
     // Resolved rpcNames come from the type-level `RpcNames[Real].Names` (one authority), read back as
     // values here — SAME order and result as the engine's `RpcName.computeAll`.
-    val names: List[String] = RpcNames.namesOf[Real](RpcNames.summonNames[Real])
+    val values: List[String] = RpcNames.namesOf[Real](names)
 
     val metaTpe: TypeRepr = TypeRepr.of[M[Real]]
-    buildValue(metaTpe, Context.Trait(ops, names)).asExprOf[M[Real]]
+    buildValue(metaTpe, Context.Trait(ops, values)).asExprOf[M[Real]]
 
   /**
    * Builds `new MetaTpe(<filled params>)` by classifying each primary-constructor param of `metaTpe`
