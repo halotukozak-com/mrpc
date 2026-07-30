@@ -136,7 +136,6 @@ private[mrpc] object Matcher:
   private def planOne(opAndName: (Type[?], String))(using Quotes): Type[?] =
     import quotes.reflect.*
     val (opType, rpcName) = opAndName
-    val label = OpReflect.labelOf(opType)
     val arityType: Type[? <: ArityTag] = arityOf(OpReflect.outputType(opType))
     val paramTypes: List[Type[?]] = OpReflect.inputElems(opType).map(planParam)
     val paramsType: Type[? <: Tuple] = TupleTraverse.foldTuple(paramTypes)
@@ -144,7 +143,10 @@ private[mrpc] object Matcher:
     // Under the fixed-RawRpc model the result is always encoded via the summoned leaf bridge unless
     // it is itself Raw; @verbatim on a non-Raw result has no identity to land on. Result-verbatim is
     // therefore only reachable through the same Raw-type check params use; v1 fixtures encode results.
-    (ConstantType(StringConstant(label)).asType, ConstantType(StringConstant(rpcName)).asType, arityType, paramsType, opType) match
+    // `label` relays the op's EXISTING `Label` type directly (`labelTypeOf`); `rpcName` has no
+    // pre-existing type to relay — it's a value computed by `RpcName.computeAll` — so it genuinely
+    // needs lifting via `ConstantType(StringConstant(...))`.
+    (OpReflect.labelTypeOf(opType), ConstantType(StringConstant(rpcName)).asType, arityType, paramsType, opType) match
       case (
             '[type l <: String; l],
             '[type n <: String; n],
@@ -184,12 +186,11 @@ private[mrpc] object Matcher:
    * fixed-String fixtures no param is `Raw`, so this resolves to `Encoded`, matching the divergence.
    */
   private def planParam(param: Type[?])(using Quotes): Type[?] =
-    import quotes.reflect.*
     val paramType = OpReflect.paramTypeOf(param)
     val encodingType: Type[? <: EncodingTag] =
       if OpReflect.paramHasVerbatim(param) && OpReflect.isRawCarrier(paramType) then Type.of[EncodingTag.Verbatim]
       else Type.of[EncodingTag.Encoded]
-    (ConstantType(StringConstant(OpReflect.labelOf(param))).asType, paramType, encodingType) match
+    (OpReflect.labelTypeOf(param), paramType, encodingType) match
       case ('[type l <: String; l], '[t], '[type e <: EncodingTag; e]) =>
         Type.of[ParamPlan { type Label = l; type ParamType = t; type Encoding = e }]
-      case _ => report.errorAndAbort(s"could not build ParamPlan for param")
+      case _ => quotes.reflect.report.errorAndAbort(s"could not build ParamPlan for param")

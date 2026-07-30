@@ -1,5 +1,7 @@
 package mrpc.derive
 
+import made.{DoneOperation, InputElem}
+
 import scala.quoted.*
 
 /**
@@ -20,9 +22,11 @@ private[mrpc] sealed trait Param:
  * `InputElem`s, projected into [[Param]]) — `Label`, `OutputType`, `InputElems`, and the method/param
  * `Metadata` chains.
  *
- * Annotation reading mirrors made's `getAnnotationImpl` (extensions.scala): each `MetaAnnotation` is
- * captured in the `Metadata` tuple as an `AnnotatedType(Meta, annot)`, so a `<:<` match over the
- * traversed metadata entries locates an annotation and exposes it as a term for value extraction.
+ * Member reads (`labelOf`, `outputType`, ...) go through plain quote-pattern matching on a structural
+ * refinement (`case '[DoneOperation { type Label = l }] => Type.of[l]`) — ordinary quotes/splices, no
+ * `quotes.reflect` symbol lookup by name. Only annotation-CONTENT reading (`findAnnotation` and below)
+ * still needs `quotes.reflect`: an annotation's constructor arguments are term-level data (mirrors
+ * made's `getAnnotationImpl`, extensions.scala), which has no quote-pattern shortcut.
  *
  * Widened to `private[mrpc]` because it is the shared reflection reused by BOTH the engine and
  * metadata materialization — one Done-walk path, no fork.
@@ -31,14 +35,27 @@ private[mrpc] object OpReflect:
 
   /** The op's (or param's) `Label` singleton-string member as a plain `String`. */
   def labelOf(opType: Type[?])(using Quotes): String =
-    import quotes.reflect.*
-    memberType(opType, "Label") match
-      case ConstantType(StringConstant(s)) => s
-      case other => report.errorAndAbort(s"Label is not a string literal: ${other.show}")
+    labelTypeOf(opType) match
+      case '[type l <: String; l] =>
+        Type.valueOfConstant[l].getOrElse(quotes.reflect.report.errorAndAbort("Label is not a string literal")).toString
+
+  /**
+   * The op's (or param's) `Label` member AS A TYPE — the singleton string type itself, not lowered
+   * to a `String` value. For callers that only ever relay the label into another refined type (e.g.
+   * `Matcher.planParam` building a `ParamPlan`), this skips the pointless type -> value -> type
+   * round-trip `labelOf` followed by re-lifting a `String` would otherwise take.
+   */
+  def labelTypeOf(t: Type[?])(using Quotes): Type[?] =
+    t match
+      case '[DoneOperation { type Label = l }] => Type.of[l]
+      case '[Param { type Label = l }] => Type.of[l]
+      case _ => quotes.reflect.report.errorAndAbort(s"no Label member on ${Type.show(using t)}")
 
   /** The param's `ParamType` member — its declared parameter type. */
   def paramTypeOf(paramType: Type[?])(using Quotes): Type[?] =
-    memberType(paramType, "ParamType").asType
+    paramType match
+      case '[Param { type ParamType = t }] => Type.of[t]
+      case _ => quotes.reflect.report.errorAndAbort(s"no ParamType member on ${Type.show(using paramType)}")
 
   /** `true` when the param carries a `@verbatim` annotation. */
   def paramHasVerbatim(paramType: Type[?])(using Quotes): Boolean =
@@ -46,7 +63,9 @@ private[mrpc] object OpReflect:
 
   /** The op's `OutputType` member as a `Type`. */
   def outputType(opType: Type[?])(using Quotes): Type[?] =
-    memberType(opType, "OutputType").asType
+    opType match
+      case '[DoneOperation { type OutputType = o }] => Type.of[o]
+      case _ => quotes.reflect.report.errorAndAbort(s"no OutputType member on ${Type.show(using opType)}")
 
   /**
    * The op's per-parameter-list arities, read off its `ParamLists` (a tuple of singleton `Int`s).
@@ -57,29 +76,27 @@ private[mrpc] object OpReflect:
    *   - `1 *: 2 *: EmptyTuple`  (`def f(a)(b, c)`)           -> `List(1, 2)`
    */
   def paramListSizes(opType: Type[?])(using Quotes): List[Int] =
-    import quotes.reflect.*
-    memberType(opType, "ParamLists").asType match
-      case '[type lists <: Tuple; lists] =>
-        TupleTraverse.traverseTuple(Type.of[lists]).map { t =>
-          TypeRepr.of(using t).dealias match
-            case ConstantType(IntConstant(n)) => n
-            case other =>
-              report.errorAndAbort(s"ParamLists entry is not an Int literal: ${other.show}")
+    opType match
+      case '[type lists <: Tuple; DoneOperation { type ParamLists = lists }] =>
+        TupleTraverse.traverseTuple(Type.of[lists]).map {
+          case '[type n <: Int; n] =>
+            Type.valueOfConstant[n].getOrElse(quotes.reflect.report.errorAndAbort("ParamLists entry is not an Int literal"))
+          case other => quotes.reflect.report.errorAndAbort(s"ParamLists entry is not an Int literal: ${Type.show(using other)}")
         }
-      case _ => report.errorAndAbort("ParamLists is not a tuple")
+      case _ => quotes.reflect.report.errorAndAbort(s"no ParamLists member on ${Type.show(using opType)}")
 
   /** The op's flattened `InputElems`, each projected into a refined [[Param]] type. */
   def inputElems(opType: Type[?])(using Quotes): List[Type[? <: Param]] =
-    import quotes.reflect.*
-    memberType(opType, "InputElems").asType match
-      case '[type elems <: Tuple; elems] =>
+    opType match
+      case '[type elems <: Tuple; DoneOperation { type InputElems = elems }] =>
         TupleTraverse.traverseTuple(Type.of[elems]).map(paramOf)
-      case _ => report.errorAndAbort("InputElems is not a tuple")
+      case _ => quotes.reflect.report.errorAndAbort(s"no InputElems member on ${Type.show(using opType)}")
 
   /** The op's (or param's) `Metadata` tuple entries as types (each an `AnnotatedType(Meta, annot)`). */
-  def metadataEntries(opType: Type[?])(using Quotes): List[Type[?]] =
-    memberType(opType, "Metadata").asType match
-      case '[type meta <: Tuple; meta] => TupleTraverse.traverseTuple(Type.of[meta])
+  def metadataEntries(t: Type[?])(using Quotes): List[Type[?]] =
+    t match
+      case '[type meta <: Tuple; DoneOperation { type Metadata = meta }] => TupleTraverse.traverseTuple(Type.of[meta])
+      case '[type meta <: Tuple; Param { type Metadata = meta }] => TupleTraverse.traverseTuple(Type.of[meta])
       case _ => Nil
 
   /** Reads a singleton-string-valued field `field` off an annotation of type `A` on the op, if present. */
@@ -101,29 +118,18 @@ private[mrpc] object OpReflect:
    */
   def isRawCarrier(tpe: Type[?])(using Quotes): Boolean =
     import quotes.reflect.*
-    val repr = TypeRepr.of(using tpe)
     // An abstract type member / type parameter (no concrete dealias) is the only thing that could be
-    // the engine's `Raw`. Concrete leaf types (Int, String, User, ...) are always encoded.
-    repr.typeSymbol.isAbstractType
+    // the engine's `Raw`. Concrete leaf types (Int, String, User, ...) are always encoded. Whether a
+    // type is abstract vs. concrete isn't a named member to pattern-match on, so this stays reflect-API.
+    TypeRepr.of(using tpe).typeSymbol.isAbstractType
 
   // --- internals ---
 
-  private def memberType(using q: Quotes)(tpe: Type[?], name: String): q.reflect.TypeRepr =
-    import q.reflect.*
-    val repr = TypeRepr.of(using tpe)
-    val member = repr.typeSymbol.typeMember(name)
-    repr.select(member).dealias
-
   private def paramOf(elemType: Type[?])(using Quotes): Type[? <: Param] =
-    import quotes.reflect.*
-    val repr = TypeRepr.of(using elemType)
-    val labelType = repr.select(repr.typeSymbol.typeMember("Label")).dealias.asType
-    val paramTypeType = repr.select(repr.typeSymbol.typeMember("Type")).dealias.asType
-    val metaType = repr.select(repr.typeSymbol.typeMember("Metadata")).dealias.asType
-    (labelType, paramTypeType, metaType) match
-      case ('[type l <: String; l], '[t], '[type m <: Tuple; m]) =>
+    elemType match
+      case '[InputElem { type Label = l; type Type = t; type Metadata = m }] =>
         Type.of[Param { type Label = l; type ParamType = t; type Metadata = m }]
-      case _ => report.errorAndAbort(s"could not build Param for ${repr.show}")
+      case _ => quotes.reflect.report.errorAndAbort(s"could not build Param for ${Type.show(using elemType)}")
 
   /** Locates an annotation term of type `A` in the op's `Metadata`, like made's `getAnnotationImpl`. */
   private def findAnnotation[A: Type](using q: Quotes)(opType: Type[?]): Option[q.reflect.Term] =

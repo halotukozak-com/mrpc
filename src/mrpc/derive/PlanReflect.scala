@@ -5,16 +5,13 @@ import scala.quoted.*
 /**
  * Reads the type-level members of a refined [[OpPlan]] (and its [[ParamPlan]]s) — `Label`,
  * `RpcName`, `ArityInfo`, `Params`, `ResultEncoding`, `OpType` — the plan-side counterpart of
- * [[OpReflect]] (which does the same for made's `DoneOperation`). Ad hoc accessors on a `Type[?]`,
- * mirroring [[OpReflect]]'s own shape, rather than one eager bundle: `AsRawDerivation`/
- * `AsRealDerivation` keep carrying the plan's `Type[?]` itself and query it where needed.
+ * [[OpReflect]] (which does the same for made's `DoneOperation`).
  *
- * Match-type extraction (e.g. `type ExtractLabel[P] = P match { case OpPlan { type Label = l } => l
- * }`) does NOT reduce once a type has passed through an opaque `Type[?]` — the same wall [[OpReflect]]
- * already routes around for `DoneOperation` (see made's `MappedTupleEvidenceTest`). Every [[OpPlan]]
- * `Matcher.planAll` builds crosses exactly that boundary (folded into a `Tuple` type, then traversed
- * back into a `List[Type[?]]`), so member lookup here goes through `quotes.reflect`
- * (`typeMember`/`select`/`dealias`) instead, same as [[OpReflect]].
+ * Member reads go through plain quote-pattern matching on a structural refinement (`case '[OpPlan {
+ * type Label = l }] => Type.of[l]`) — ordinary quotes/splices, no `quotes.reflect` symbol lookup by
+ * name. Ad hoc accessors on a `Type[?]`, mirroring [[OpReflect]]'s own shape, rather than one eager
+ * bundle: `AsRawDerivation`/`AsRealDerivation` keep carrying the plan's `Type[?]` itself and query it
+ * where needed.
  */
 private[derive] object PlanReflect:
 
@@ -22,41 +19,56 @@ private[derive] object PlanReflect:
   final case class Param(label: String, paramType: Type[?], encoding: Type[?])
 
   /** The plan's `Label` member (the underlying op's source name). */
-  def labelOf(planType: Type[?])(using Quotes): String = stringMember(planType, "Label")
+  def labelOf(planType: Type[?])(using Quotes): String =
+    labelTypeOf(planType) match
+      case '[type l <: String; l] =>
+        Type.valueOfConstant[l].getOrElse(quotes.reflect.report.errorAndAbort("Label is not a string literal")).toString
+
+  /** The plan's `Label` member as a type (the singleton string type itself). */
+  def labelTypeOf(planType: Type[?])(using Quotes): Type[?] =
+    planType match
+      case '[OpPlan { type Label = l }] => Type.of[l]
+      case '[ParamPlan { type Label = l }] => Type.of[l]
+      case _ => quotes.reflect.report.errorAndAbort(s"no Label member on ${Type.show(using planType)}")
 
   /** The plan's `RpcName` member (the resolved rpcName). */
-  def rpcNameOf(planType: Type[?])(using Quotes): String = stringMember(planType, "RpcName")
+  def rpcNameOf(planType: Type[?])(using Quotes): String =
+    planType match
+      case '[OpPlan { type RpcName = n }] =>
+        Type.of[n] match
+          case '[type nn <: String; nn] =>
+            Type.valueOfConstant[nn].getOrElse(quotes.reflect.report.errorAndAbort("RpcName is not a string literal")).toString
+      case _ => quotes.reflect.report.errorAndAbort(s"no RpcName member on ${Type.show(using planType)}")
 
   /** The plan's `ArityInfo` member, as its raw [[ArityTag]] type — quote-pattern-match it directly
     * (`case '[ArityTag.Fire] => ...` / `case '[ArityTag.CallOf[r]] => ...`) at the call site. */
-  def arityOf(planType: Type[?])(using Quotes): Type[?] = memberType(planType, "ArityInfo").asType
+  def arityOf(planType: Type[?])(using Quotes): Type[?] =
+    planType match
+      case '[OpPlan { type ArityInfo = a }] => Type.of[a]
+      case _ => quotes.reflect.report.errorAndAbort(s"no ArityInfo member on ${Type.show(using planType)}")
 
   /** The plan's `Params` member, traversed and each element projected into a [[Param]]. */
   def paramsOf(planType: Type[?])(using Quotes): List[Param] =
-    memberType(planType, "Params").asType match
-      case '[type ps <: Tuple; ps] => TupleTraverse.traverseTuple(Type.of[ps]).map(paramOf)
+    planType match
+      case '[OpPlan { type Params = ps }] =>
+        Type.of[ps] match
+          case '[type pst <: Tuple; pst] => TupleTraverse.traverseTuple(Type.of[pst]).map(paramOf)
       case _ => Nil
 
   /** The plan's `ResultEncoding` member, as its raw [[EncodingTag]] type. */
-  def resultEncodingOf(planType: Type[?])(using Quotes): Type[?] = memberType(planType, "ResultEncoding").asType
+  def resultEncodingOf(planType: Type[?])(using Quotes): Type[?] =
+    planType match
+      case '[OpPlan { type ResultEncoding = e }] => Type.of[e]
+      case _ => quotes.reflect.report.errorAndAbort(s"no ResultEncoding member on ${Type.show(using planType)}")
 
   /** The plan's `OpType` member — the underlying refined `DoneOperation` type it describes. */
-  def opTypeOf(planType: Type[?])(using Quotes): Type[?] = memberType(planType, "OpType").asType
+  def opTypeOf(planType: Type[?])(using Quotes): Type[?] =
+    planType match
+      case '[OpPlan { type OpType = o }] => Type.of[o]
+      case _ => quotes.reflect.report.errorAndAbort(s"no OpType member on ${Type.show(using planType)}")
 
   private def paramOf(paramType: Type[?])(using Quotes): Param =
-    Param(
-      stringMember(paramType, "Label"),
-      memberType(paramType, "ParamType").asType,
-      memberType(paramType, "Encoding").asType,
-    )
-
-  private def memberType(using q: Quotes)(tpe: Type[?], name: String): q.reflect.TypeRepr =
-    import q.reflect.*
-    val repr = TypeRepr.of(using tpe)
-    repr.select(repr.typeSymbol.typeMember(name)).dealias
-
-  private def stringMember(using Quotes)(tpe: Type[?], name: String): String =
-    import quotes.reflect.*
-    memberType(tpe, name) match
-      case ConstantType(StringConstant(s)) => s
-      case other => report.errorAndAbort(s"$name is not a string literal: ${other.show}")
+    paramType match
+      case '[ParamPlan { type Label = l; type ParamType = t; type Encoding = e }] =>
+        Param(labelOf(paramType), Type.of[t], Type.of[e])
+      case _ => quotes.reflect.report.errorAndAbort(s"could not read ParamPlan for ${Type.show(using paramType)}")
