@@ -3,14 +3,21 @@ package mrpc.derive
 import mrpc.derive.SampleApi.*
 
 /**
- * The whole-trait [[RpcNames]] derivation must resolve the SAME names as the engine's
- * [[Matcher.describe]] / [[RpcName.computeAll]] — over the REAL `SampleApi`, whose ops carry
- * `MetaAnnotation`s (`@multi`, `@rpcName`, …). This is the annotation-proof path that the per-op
- * `summonAll` cannot take.
+ * The whole-trait [[RpcNames]] derivation resolves every op's rpcName over the REAL `SampleApi`, whose
+ * ops carry `MetaAnnotation`s (`@multi`, `@rpcName`, …) — the annotation-proof path that the per-op
+ * `summonAll` cannot take. `Matcher`/`MetadataDerivation` both source their names from THIS SAME
+ * derivation ([[RpcNames.namesOf]]), so there is nothing else to cross-check against.
  */
 class RpcNamesSuite extends munit.FunSuite:
 
   test("RpcNames.Names resolves all rpcNames over an annotated trait"):
     val rn = summon[RpcNames[SampleApi]]
     val resolved: List[String] = rn.names.toList.map(_.toString)
-    assertEquals(resolved.sorted, Matcher.describe[SampleApi].map(_.rpcName).sorted)
+    assertEquals(resolved.size, 9)
+    // every op except the overloaded `lookup` pair resolves to its plain (unsuffixed) name
+    val plain = Set("ping", "increment", "find", "users", "combine", "echoBool", "findOne")
+    assertEquals(resolved.filterNot(_.startsWith("lookup_")).toSet, plain)
+    // the overloaded pair disambiguates to two distinct signature-hash-suffixed names
+    val lookupNames = resolved.filter(_.startsWith("lookup_"))
+    assertEquals(lookupNames.size, 2)
+    assertEquals(lookupNames.distinct.size, 2)

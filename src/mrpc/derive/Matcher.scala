@@ -19,75 +19,9 @@ import made.Done
  * generic-raw-method matcher would plug tag logic in.
  *
  * Widened to `private[mrpc]` because it is the shared introspection reused by BOTH the engine
- * (matching/dispatch) and metadata materialization — one Done-walk path, no fork. The cross-package
- * metadata suite also asserts the metadata rpcNames EQUAL [[describe]]'s.
+ * (matching/dispatch) and metadata materialization — one Done-walk path, no fork.
  */
 private[mrpc] object Matcher:
-
-  /**
-   * Test-facing entry point: classifies every operation of `T` and yields the flattened, runtime
-   * [[OpDescriptor]] list the suites assert against. The full `OpPlan` (with its `Type[?]` payloads)
-   * stays inside the macro; only the comparable projection escapes.
-   */
-  inline def describe[T]: List[OpDescriptor] = ${ describeImpl[T] }
-
-  private def describeImpl[T: Type](using Quotes): Expr[List[OpDescriptor]] =
-    val descriptors = plans[T](summonDone[T]).map(descriptorExpr)
-    Expr.ofList(descriptors)
-
-  /** Renders one [[OpPlan]] type into the runtime [[OpDescriptor]] the tests compare against. */
-  private def descriptorExpr(plan: Type[?])(using Quotes): Expr[OpDescriptor] =
-    val label = plan.runtimeChecked match
-      case '[type l <: String; { type Label = l }] =>
-        Type.valueOfConstant[l].getOrElse(quotes.reflect.report.errorAndAbort("Label is not a string literal")).toString
-
-    val rpcName = plan.runtimeChecked match
-      case '[OpPlan { type RpcName = n }] =>
-        Type.of[n] match
-          case '[type nn <: String; nn] =>
-            Type.valueOfConstant[nn].getOrElse(quotes.reflect.report.errorAndAbort("RpcName is not a string literal")).toString
-
-    val arityInfo: Type[?] = plan.runtimeChecked match
-      case '[OpPlan { type ArityInfo = a }] => Type.of[a]
-    val (arityTag, carried) = arityInfo match
-      case '[ArityTag.Fire] => ("fire", "")
-      case '[ArityTag.CallOf[r]] => ("call", typeShow(Type.of[r]))
-      case '[ArityTag.GetOf[s]] => ("get", typeShow(Type.of[s]))
-      case _ => quotes.reflect.report.errorAndAbort("unrecognized ArityTag")
-
-    val paramsType: Type[?] = plan.runtimeChecked match
-      case '[OpPlan { type Params = ps }] => Type.of[ps]
-    val paramEncodings = paramsType match
-      case '[type pst <: Tuple; pst] =>
-        TupleTraverse.traverseTuple(Type.of[pst]).map { pt =>
-          val encoding: Type[?] = pt.runtimeChecked match
-            case '[ParamPlan { type Encoding = e }] => Type.of[e]
-          encodingTag(encoding)
-        }
-
-    val resultEncoding = encodingTag(plan.runtimeChecked match {
-      case '[OpPlan { type ResultEncoding = e }] => Type.of[e]
-    })
-
-    '{
-      OpDescriptor(
-        label = ${ Expr(label) },
-        rpcName = ${ Expr(rpcName) },
-        arity = ${ Expr(arityTag) },
-        carriedType = ${ Expr(carried) },
-        paramEncodings = ${ Expr(paramEncodings) },
-        resultEncoding = ${ Expr(resultEncoding) },
-      )
-    }
-
-  private def encodingTag(tag: Type[?])(using Quotes): String = tag match
-    case '[EncodingTag.Encoded] => "encoded"
-    case '[EncodingTag.Verbatim] => "verbatim"
-    case _ => quotes.reflect.report.errorAndAbort("unrecognized EncodingTag")
-
-  private def typeShow(t: Type[?])(using Quotes): String =
-    import quotes.reflect.*
-    TypeRepr.of(using t).show
 
   /**
    * Summons the `Done.Of[T]` mirror ONCE. Callers thread the result into [[planAll]] /
@@ -131,9 +65,9 @@ private[mrpc] object Matcher:
    * `transparent inline`, the same technique `made.Done.derived` uses to make its refined type
    * visible outside the macro. Lets ordinary, non-macro code (tests) assert compile-time facts about
    * one operation's classification, e.g. `summon[Matcher.planFor[SampleApi, "ping"].ArityInfo =:=
-   * ArityTag.Fire]`, instead of comparing a runtime [[OpDescriptor]] with `assertEquals`. The returned
-   * value is a `null` dummy: nothing here is ever meant to be called/dereferenced at runtime, only its
-   * STATIC type — a plain type projection — is used.
+   * ArityTag.Fire]`, instead of comparing a runtime value with `assertEquals`. The returned value is a
+   * `null` dummy: nothing here is ever meant to be called/dereferenced at runtime, only its STATIC
+   * type — a plain type projection — is used.
    */
   transparent inline def planFor[T, L <: String]: OpPlan = ${ planForImpl[T, L] }
 
@@ -148,6 +82,29 @@ private[mrpc] object Matcher:
     planOne((ops(idx), resolvedNames(idx))) match
       case '[type p <: OpPlan; p] => '{ null.asInstanceOf[p] }
       case _ => report.errorAndAbort(s"could not build OpPlan for label '$label'")
+
+  /**
+   * Like [[planFor]], but returns EVERY operation sharing label `L` as a tuple (declaration order) —
+   * needed when a label is shared by more than one op (overloads), to compare their [[OpPlan]]s
+   * against each other at the type level (e.g. asserting their resolved `RpcName`s differ via
+   * `scala.util.NotGiven`). `transparent inline`, so destructuring the tuple (`val (a, b) =
+   * plansFor[...]`) gives each bound val its OWN precise `OpPlan` type, same as [[planFor]] does for a
+   * single operation.
+   */
+  transparent inline def plansFor[T, L <: String]: Tuple = ${ plansForImpl[T, L] }
+
+  private def plansForImpl[T: Type, L: Type](using Quotes): Expr[Tuple] =
+    import quotes.reflect.*
+    val done = summonDone[T]
+    val ops = operationTypes(done)
+    val resolvedNames = RpcNames.namesOf[T](RpcNames.summonNames[T])
+    val label = Type.valueOfConstant[L].getOrElse(report.errorAndAbort("L must be a literal string")).toString
+    val matches = ops.zip(resolvedNames).filter((op, _) => OpReflect.labelOf(op) == label)
+    if matches.isEmpty then report.errorAndAbort(s"no operation labeled '$label' in ${TypeRepr.of[T].show}")
+    val nulls: List[Expr[Any]] = matches.map(planOne).map {
+      case '[type p <: OpPlan; p] => '{ null.asInstanceOf[p] }
+    }
+    Expr.ofRefinedTuple(nulls)
 
   /** Extracts the refined `DoneOperation` element types from the (passed-in) mirror's `Operations`. */
   private[mrpc] def operationTypes[T: Type](doneExpr: Expr[Done.Of[T]])(using Quotes): List[Type[?]] =

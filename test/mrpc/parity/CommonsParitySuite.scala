@@ -3,9 +3,11 @@ package mrpc.parity
 import scala.concurrent.duration.Duration
 import scala.concurrent.{Await, ExecutionContext, Future}
 
+import scala.util.NotGiven
+
 import mrpc.conv.{AsRaw, AsReal}
 import mrpc.derive.SampleApi.*
-import mrpc.derive.{Matcher, OpDescriptor, SampleApi}
+import mrpc.derive.{Matcher, SampleApi}
 import mrpc.raw.RawRpc
 
 /**
@@ -126,21 +128,16 @@ class CommonsParitySuite extends munit.FunSuite:
     assertNotEquals(byId, byName)
 
   test("overloads disambiguate to distinct rpcNames (D4 signature-hash suffix, not positional _1/_2)"):
-    val lookupNames: List[String] = Matcher.describe[SampleApi].filter(_.label == "lookup").map(_.rpcName)
-    assertEquals(lookupNames.size, 2)
-    assertEquals(lookupNames.distinct.size, 2, s"overloads must disambiguate, got $lookupNames")
+    // Checked at compile time (same technique as MatchingSuite): a wrong fact here fails to COMPILE.
+    val (byId, byName) = Matcher.plansFor[SampleApi, "lookup"]
+    summon[NotGiven[byId.RpcName =:= byName.RpcName]]
 
   // --- 4. rpcName/prefix + @multi/arity (commons NewRawRpc rpcName intent) -------------------------
 
   test("@rpcName override resolves (NewRawRpc rpcName / v2_status / findOne analog)"):
-    val plans: List[OpDescriptor] = Matcher.describe[SampleApi]
-    assertEquals(plans.filter(_.label == "findRenamed").map(_.rpcName), List("findOne"))
+    val findRenamed = Matcher.planFor[SampleApi, "findRenamed"]
+    summon[findRenamed.RpcName =:= "findOne"]
 
-  test("a @multi param is classified additively without changing arity"):
-    // increment(@multi n: Int) is still a single-arg `call` op: @multi is additive metadata under the
-    // fixed-RawRpc model and does NOT split the param or change the arity (the @multi-collection
-    // extraction commons does is D7, skipped). One encoded value param, `call` arity.
-    val increment: OpDescriptor =
-      Matcher.describe[SampleApi].find(_.label == "increment").getOrElse(fail("no increment op"))
-    assertEquals(increment.arity, "call")
-    assertEquals(increment.paramEncodings, List("encoded"))
+  // A @multi param being classified additively (arity/params unaffected) is asserted at the type
+  // level in MatchingSuite against this SAME `increment` op — no separate runtime check needed here;
+  // "call dispatch returns the typed result" above already exercises it end-to-end through the loopback.

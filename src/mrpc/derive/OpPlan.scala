@@ -3,10 +3,9 @@ package mrpc.derive
 /**
  * Type-level tag for which `RawRpc` dispatch method (`fire`/`call`/`get`) an operation routes to.
  * `Call`/`Get` carry their payload (the `Future` result type / the sub-RPC type) as a type member, so
- * it survives as part of an [[OpPlan]]'s own type. The matcher, the two materialize macros, and
- * [[Matcher.describe]]'s test-facing projection all classify arity by quote-pattern-matching this
- * type directly (`case '[ArityTag.Fire] => ...` / `case '[ArityTag.CallOf[r]] => ...`) — there is no
- * separate value-level enum to keep in sync with it.
+ * it survives as part of an [[OpPlan]]'s own type. The matcher and the two materialize macros all
+ * classify arity by quote-pattern-matching this type directly (`case '[ArityTag.Fire] => ...` /
+ * `case '[ArityTag.CallOf[r]] => ...`) — there is no separate value-level enum to keep in sync with it.
  */
 private[derive] sealed trait ArityTag
 private[derive] object ArityTag:
@@ -42,8 +41,10 @@ private[derive] sealed trait ParamPlan:
  * plan, and the underlying `DoneOperation` this plan describes. [[Matcher.planAll]] builds a
  * `Plans <: Tuple` of these — one per `Done.Operations` entry, in the same order, so a plan's
  * position in `Plans` (equivalently, in [[Matcher.plans]]'s resulting list) IS its `Done.Operations`
- * index. Mirrors how made's `Done` models `T` as a `Tuple` of `DoneOperation`s; read back via
- * [[PlanReflect]].
+ * index. Mirrors how made's `Done` models `T` as a `Tuple` of `DoneOperation`s. Read back via local
+ * quote-pattern reads on the plan's `Type[?]` (`Matcher`, `AsRawDerivation`, `AsRealDerivation` each
+ * keep their own), or directly by test code via `Matcher.planFor`/`Matcher.plansFor` + `summon[... =:=
+ * ...]` (see `MatchingSuite`/`RpcNameSuite`) — there is no runtime-comparable projection of an `OpPlan`.
  */
 private[derive] sealed trait OpPlan:
   type Label <: String
@@ -52,18 +53,3 @@ private[derive] sealed trait OpPlan:
   type Params <: Tuple
   type ResultEncoding <: EncodingTag
   type OpType
-
-/**
- * Flattened, runtime-comparable projection of one [[OpPlan]] — the test-facing output of the matcher.
- * Because an [[OpPlan]] is a TYPE (carrying `Type[?]`-only information), the suites assert against
- * this plain case class instead (arity rendered as a tag, the carried result/sub-RPC type as its
- * `show` string, and per-param encodings as comparable strings) — see [[Matcher.describe]].
- */
-final case class OpDescriptor(
-  label: String,
-  rpcName: String,
-  arity: String,
-  carriedType: String,
-  paramEncodings: List[String],
-  resultEncoding: String,
-)

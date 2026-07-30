@@ -42,12 +42,12 @@ class MultiCollectionSuite extends munit.FunSuite:
     val ping = md.methods.find(_.name == "ping").get
     assertEquals(ping.params.map(_.name), Nil)
 
-  test("no-fork invariant: metadata rpcNames EQUAL the engine's (Matcher.describe)"):
+  test("op labels cover every method of the trait (no-fork by construction, shared Done walk)"):
     val md = TraitMeta.materialize[SampleApi]
-    // Build resolved rpcNames the same way META2-01's @reifyName(useRawName) does, keyed by label,
-    // and compare to the engine's Matcher.describe projection.
-    val engineByLabel: Map[String, List[String]] =
-      mrpc.derive.Matcher.describe[SampleApi].groupMap(_.label)(_.rpcName)
-    // For this suite each method carries its source label as `name`; assert the LABEL set matches the
-    // engine's labels (the resolved-name equality is asserted in ApiMeta's @reifyName(useRawName) path).
-    assertEquals(md.methods.map(_.name).toSet, engineByLabel.keySet)
+    // Both this metadata path and the engine walk the SAME `Done.Of[SampleApi]` mirror, so the op set
+    // can't fork — asserted directly against the known fixture label set (resolved-name equality is
+    // asserted in ApiMeta's @reifyName(useRawName) path, MetadataSuite).
+    assertEquals(
+      md.methods.map(_.name).toSet,
+      Set("ping", "increment", "find", "users", "lookup", "combine", "echoBool", "findRenamed"),
+    )

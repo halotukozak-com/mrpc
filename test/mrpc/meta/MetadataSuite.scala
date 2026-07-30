@@ -28,9 +28,11 @@ object ApiInfo extends RpcMetadataCompanion[ApiInfo]
 /**
  * The migrated v1 `MetadataSuite`, rewritten onto the TypedMetadata DSL (the v1 flat `RpcMetadata`
  * surface is retired). Re-asserts the v1 behaviors against the new shape — every op listed, params in
- * declaration order, resolved rpcName, per-method/per-param annotation — and PRESERVES the no-fork
- * invariant: the metadata rpcNames EQUAL the engine's (`Matcher.describe`). Arity is asserted against
- * the engine projection (arity is engine-derived; the DSL has no arity slot — there is one classifier).
+ * declaration order, resolved rpcName, per-method/per-param annotation. The no-fork invariant (resolved
+ * rpcNames == the engine's) no longer needs its own check: both this metadata path and the engine
+ * source rpcNames from the SAME `RpcNames.namesOf` authority (see `MetadataDerivation`/`Matcher`), so
+ * they cannot diverge by construction. Arity classification is asserted at the type level in
+ * `mrpc.derive.MatchingSuite` (the DSL itself has no arity slot — there is one classifier).
  */
 class MetadataSuite extends munit.FunSuite:
 
@@ -42,13 +44,6 @@ class MetadataSuite extends munit.FunSuite:
       md.methods.map(_.label).toSet,
       Set("ping", "increment", "find", "users", "lookup", "combine", "echoBool", "findRenamed"),
     )
-
-  test("arity tag is fire/call/get per output type (engine-derived, no fork)"):
-    val arityByLabel: Map[String, List[String]] =
-      mrpc.derive.Matcher.describe[SampleApi].groupMap(_.label)(_.arity)
-    assertEquals(arityByLabel("ping"), List("fire"))
-    assertEquals(arityByLabel("increment"), List("call"))
-    assertEquals(arityByLabel("users"), List("get"))
 
   test("params are listed in declaration order, flattened across param lists"):
     assertEquals(op("combine").params.map(_.name), List("a", "b", "c"))
@@ -68,11 +63,3 @@ class MetadataSuite extends munit.FunSuite:
     // a param WITHOUT @multi reifies None
     val idParam = op("find").params.find(_.name == "id").get
     assertEquals(idParam.multiAnnot, None)
-
-  test("resolved rpcNames EQUAL the engine's (shared Done path, no fork)"):
-    // The engine's resolved names come from Matcher.describe[SampleApi]; the metadata must not fork.
-    val engineByLabel: Map[String, List[String]] =
-      mrpc.derive.Matcher.describe[SampleApi].groupMap(_.label)(_.rpcName)
-    val metaByLabel: Map[String, List[String]] =
-      md.methods.groupMap(_.label)(_.rpcName)
-    assertEquals(metaByLabel, engineByLabel)
