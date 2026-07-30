@@ -31,32 +31,30 @@ object AsRealDerivation:
    * per-`raw` proxy body is generated. `ExecutionContext` is in scope so the `call` arity can compose
    * `AsReal[Future[Raw], Future[r]]` via `forFuture`.
    */
-  inline def impl[Raw, Real](using Done.Of[Real], ExecutionContext): AsReal[RawRpc[Raw], Real] =
+  inline def impl[Raw, Real: Done.Of](using ExecutionContext): AsReal[RawRpc[Raw], Real] =
     (raw: RawRpc[Raw]) => materializeProxy[Raw, Real](raw)
 
   /**
    * Macro entry: build the `Real` client proxy for a single `RawRpc[Raw]`. The mirror and
    * `ExecutionContext` are summoned here and handed to [[materializeProxyImpl]].
    */
-  inline def materializeProxy[Raw, Real](raw: RawRpc[Raw])(using Done.Of[Real], ExecutionContext): Real =
+  inline def materializeProxy[Raw, Real: Done.Of](raw: RawRpc[Raw])(using ExecutionContext): Real =
     ${ materializeProxyImpl[Raw, Real]('raw, 'summon, 'summon) }
 
   /**
    * Builds the proxy via made's `Done.materialize`: one handler per plan — shaped to match made's
    * [[Done.HandlerOf]] (a no-param op expects `() => OutputType`; a parametric op expects a
-   * `NamedTuple => OutputType`) — collected into a tuple ascribed to the EXACT `Done.HandlersOf[ops]`
-   * type, then `.to[Real]`.
+   * `NamedTuple => OutputType`) — collected into a plain `Tuple` and handed to `.to[Real]`.
    *
-   * The tuple is ascribed (`asInstanceOf[hs]`) to the concrete handler-tuple type computed from the
-   * mirror's `Operations`, then `to` is given the mirror plus `made.ValidHandlers.refl` as its
-   * handler/operation correspondence evidence. mrpc builds exactly one handler per operation, in
+   * made's `materializeImpl` reads handler `i` via `productElement(i)` rather than a
+   * `Handlers`-typed symbol lookup, so the handler tuple never needs to be ascribed to the precise
+   * `Done.HandlersOf[Operations]` (or any other concrete) type — the widened `Tuple` the handlers are
+   * collected into is enough. `to` is given the mirror plus `made.ValidHandlers.refl` as its
+   * handler/operation correspondence evidence: mrpc builds exactly one handler per operation, in
    * `Done.Operations` order, each shaped to `Done.HandlerOf[op]` (see `handlerFor`), so the handler
-   * tuple IS `Done.HandlersOf[Operations]` by construction — `refl[mirror.Operations, hs]` is the
-   * macro-side witness for that, used in place of the auto-`given`
-   * (`ValidHandlers[Ops, Done.HandlersOf[Ops]]`) whose `Done.HandlersOf` match type does not reduce
-   * during this macro's own expansion. Pinning both `to` arguments to the one `mirror` path makes the
-   * evidence the slot requires (`ValidHandlers[mirror.Operations, hs]`) syntactically what `refl`
-   * supplies, so no reduction is needed.
+   * tuple IS `Done.HandlersOf[Operations]` by construction, and `refl[mirror.Operations, Tuple]` is the
+   * macro-side witness for that — used in place of the auto-`given`
+   * (`ValidHandlers[Ops, Done.HandlersOf[Ops]]`), which a plain `Tuple` can never satisfy structurally.
    */
   private def materializeProxyImpl[Raw: Type, Real: Type](
     raw: Expr[RawRpc[Raw]],
@@ -67,32 +65,10 @@ object AsRealDerivation:
     val plans = Matcher.planAll[Real](done)
     val handlers: List[Expr[Any]] = plans.map(plan => handlerFor[Raw](raw, plan, ec))
     val handlersTuple: Expr[Tuple] = Expr.ofTupleFromSeq(handlers)
-    handlersTupleType[Real](done) match
-      case '[type hs <: Tuple; hs] =>
-        '{
-          val mirror = Done.derived[Real]
-          $handlersTuple.asInstanceOf[hs].to[Real](using mirror)(using ValidHandlers.refl[mirror.Operations, hs])
-        }
-      case _ => quotes.reflect.report.errorAndAbort("handler tuple type is not a Tuple")
-
-  /**
-   * The concrete `TupleN[Done.HandlerOf[op1], ..., Done.HandlerOf[opN]]` type for the mirror's
-   * operations. This is structurally `Done.HandlersOf[Operations]` (the contract made's `to` checks),
-   * but materialized as a concrete `TupleN` rather than the unreduced `Tuple.Map` match type: made's
-   * `materializeImpl` indexes the handler tuple via `Handlers.typeSymbol.fieldMember("_i")`, which only
-   * resolves on a concrete `TupleN`. Each element is the reduced `Done.HandlerOf[op]` (a `() => Out` or
-   * `NamedTuple => Out` function type), matching the handlers `handlerFor` builds.
-   */
-  private def handlersTupleType[Real: Type](done: Expr[Done.Of[Real]])(using Quotes): Type[?] =
-    import quotes.reflect.*
-    val ops: List[Type[?]] = Matcher.operationTypes[Real](done)
-    val elemReprs: List[TypeRepr] = ops.map { case '[o] => TypeRepr.of[Done.HandlerOf[o]].dealias }
-    val n = elemReprs.size
-    val tupleRepr =
-      if n == 0 then TypeRepr.of[EmptyTuple]
-      else if n <= 22 then defn.TupleClass(n).typeRef.appliedTo(elemReprs)
-      else elemReprs.foldRight(TypeRepr.of[EmptyTuple])((h, acc) => TypeRepr.of[*:].appliedTo(List(h, acc)))
-    tupleRepr.asType
+    '{
+      given d: Done.Of[Real] = $done
+      $handlersTuple.to[Real](using d)(using compiletime.summonInline)
+    }
 
   /**
    * One operation's handler, shaped to made's [[Done.HandlerOf]]: a no-param op becomes `() =>
@@ -106,7 +82,7 @@ object AsRealDerivation:
     plan: OpPlan,
     ec: Expr[ExecutionContext],
   )(using Quotes,
-  ): Expr[Any] =
+  ): Expr[?] =
     // The handler's precise type (`Done.HandlerOf[op]`) is imposed by the enclosing tuple ascription in
     // `handlersTupleType`, so here we only need the right ARITY shape: made invokes a no-param op's
     // handler as `() => _` and a parametric op's as `<tuple> => _`. The argument is typed `Tuple`
@@ -126,7 +102,7 @@ object AsRealDerivation:
     raw: Expr[RawRpc[Raw]],
     ec: Expr[ExecutionContext],
   )(using Quotes,
-  ): Expr[Any] =
+  ): Expr[?] =
     import quotes.reflect.*
 
     // Recover positional argument terms from the args tuple, each cast to its exact declared type, so

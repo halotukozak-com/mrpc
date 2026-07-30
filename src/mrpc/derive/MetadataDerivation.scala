@@ -43,8 +43,10 @@ private[mrpc] object MetadataDerivation:
   private enum Context:
     /** The whole real trait: ops + their resolved names, in `Done` order. */
     case Trait(ops: List[Type[?]], resolvedNames: List[String])
+
     /** A single RPC method/op (its refined `DoneOperation` type + resolved rpcName). */
     case Method(opType: Type[?], resolvedName: String)
+
     /** A single RPC parameter. */
     case Param(param: OpReflect.Param)
 
@@ -55,7 +57,7 @@ private[mrpc] object MetadataDerivation:
     val ops: List[Type[?]] = Matcher.operationTypes[Real](done) // refined op types, Done order
     // Resolved rpcNames come from the type-level `RpcNames[Real].Names` (one authority), read back as
     // values here — SAME order and result as the engine's `RpcName.computeAll`.
-    val names: List[String] = RpcNames.namesOf[Real]
+    val names: List[String] = RpcNames.namesOf[Real](RpcNames.summonNames[Real])
 
     val metaTpe: TypeRepr = TypeRepr.of[M[Real]]
     buildValue(metaTpe, Context.Trait(ops, names)).asExprOf[M[Real]]
@@ -79,29 +81,27 @@ private[mrpc] object MetadataDerivation:
     // NOT substitute the class type args); look each ctor param up by name among the case fields.
     val caseFieldsByName: Map[String, Symbol] = clsSym.caseFields.map(f => f.name -> f).toMap
 
-    val argExprs: List[Term] = termParams.map { p =>
+    val argExprs: List[Expr[Any]] = termParams.map { p =>
       val paramTpe = caseFieldsByName.get(p.name) match
         case Some(field) => metaTpe.memberType(field)
         case None => metaTpe.memberType(p)
-      fillParam(p, paramTpe, ctx).asTerm
+      fillParam(p, paramTpe, ctx)
     }
 
-    // new MetaTpe[targs](args): build `New` on the UNAPPLIED class, TypeApply the ctor with the type
-    // args, then Apply the value args. (A New whose type tree is already applied makes the ctor look
-    // parameterless to a subsequent Select, hence the explicit TypeApply here.)
-    val typeArgs: List[TypeRepr] = metaTpe match
-      case AppliedType(_, args) => args
-      case _ => Nil
-    val newSelect = Select(New(TypeIdent(clsSym)), ctor)
-    val ctorRef =
-      if typeArgs.isEmpty then newSelect
-      else TypeApply(newSelect, typeArgs.map(t => TypeTree.of(using t.asType)))
-    Apply(ctorRef, argExprs).asExprOf[Any]
+    // `new MetaTpe[targs](args)` via the compiler-synthesized `Mirror.Product` for `MetaTpe` — no
+    // constructor tree to synthesize by hand: `fromProduct` positionally applies `argExprs` (any
+    // `Product`, so a plain args tuple suffices) through the class's actual primary constructor.
+    metaTpe.asType match
+      case '[t] =>
+        '{
+          scala.compiletime
+            .summonInline[scala.deriving.Mirror.ProductOf[t]]
+            .fromProduct(${ Expr.ofTupleFromSeq(argExprs) })
+        }
 
   /** Classifies a single ctor param by its steering annotation and builds its value Expr. */
-  private def fillParam(using
-    Quotes,
-  )(param: quotes.reflect.Symbol, paramTpe: quotes.reflect.TypeRepr, ctx: Context): Expr[Any] =
+  private def fillParam(using Quotes)(param: quotes.reflect.Symbol, paramTpe: quotes.reflect.TypeRepr, ctx: Context)
+    : Expr[Any] =
     import quotes.reflect.*
 
     def has[A: Type]: Boolean = param.annotations.exists(_.tpe <:< TypeRepr.of[A])
@@ -143,9 +143,7 @@ private[mrpc] object MetadataDerivation:
    * threading the SAME real-symbol context, so C's `@reifyName` reads the enclosing real symbol (the op
    * or param), NOT C's field names (research Pitfall 3). Emits `new C(<filled params>)`.
    */
-  private def composite(using
-    Quotes,
-  )(paramTpe: quotes.reflect.TypeRepr, ctx: Context): Expr[Any] =
+  private def composite(using Quotes)(paramTpe: quotes.reflect.TypeRepr, ctx: Context): Expr[Any] =
     buildValue(paramTpe, ctx)
 
   /** Reads `@reifyName`'s `useRawName` boolean off the annotation term (default false). */
@@ -182,9 +180,7 @@ private[mrpc] object MetadataDerivation:
    *   - `@multi` / slot `List[A]`      -> ALL matching annotations on the symbol (the mrpc-owned
    *                                      tuple walk: collect every `AnnotatedType(_, a)` with `a.tpe <:< A`).
    */
-  private def reifyAnnot(using
-    Quotes,
-  )(paramTpe: quotes.reflect.TypeRepr, ctx: Context, arity: SlotArity): Expr[Any] =
+  private def reifyAnnot(using Quotes)(paramTpe: quotes.reflect.TypeRepr, ctx: Context, arity: SlotArity): Expr[Any] =
     import quotes.reflect.*
 
     val entries: List[Type[?]] = ctx match
@@ -229,9 +225,7 @@ private[mrpc] object MetadataDerivation:
             )
 
   /** `@infer`: implicit search for the param's declared type; aborts with the `@infer` clue if absent. */
-  private def infer(using
-    Quotes,
-  )(param: quotes.reflect.Symbol, paramTpe: quotes.reflect.TypeRepr): Expr[Any] =
+  private def infer(using Quotes)(param: quotes.reflect.Symbol, paramTpe: quotes.reflect.TypeRepr): Expr[Any] =
     import quotes.reflect.*
     Implicits.search(paramTpe) match
       case ok: ImplicitSearchSuccess => ok.tree.asExpr
@@ -264,9 +258,14 @@ private[mrpc] object MetadataDerivation:
    *   - `@single E` (or default)     -> the single op; `report.errorAndAbort` on 0 or >1 (research Pitfall 4).
    * Each element recurses `buildValue` in a per-op [[Context.Method]].
    */
-  private def rpcMethodMetadata(using
-    Quotes,
-  )(param: quotes.reflect.Symbol, paramTpe: quotes.reflect.TypeRepr, ctx: Context, arity: SlotArity): Expr[Any] =
+  private def rpcMethodMetadata(
+    using Quotes,
+  )(
+    param: quotes.reflect.Symbol,
+    paramTpe: quotes.reflect.TypeRepr,
+    ctx: Context,
+    arity: SlotArity,
+  ): Expr[Any] =
     import quotes.reflect.*
     val (ops, names) = ctx match
       case Context.Trait(o, n) => (o, n)
@@ -287,9 +286,14 @@ private[mrpc] object MetadataDerivation:
    * `@rpcParamMetadata`: projects over the op's `inputElems` (declaration order). Same arity shaping as
    * [[rpcMethodMetadata]]; `Map` slots are keyed by paramName.
    */
-  private def rpcParamMetadata(using
-    Quotes,
-  )(param: quotes.reflect.Symbol, paramTpe: quotes.reflect.TypeRepr, ctx: Context, arity: SlotArity): Expr[Any] =
+  private def rpcParamMetadata(
+    using Quotes,
+  )(
+    param: quotes.reflect.Symbol,
+    paramTpe: quotes.reflect.TypeRepr,
+    ctx: Context,
+    arity: SlotArity,
+  ): Expr[Any] =
     import quotes.reflect.*
     val opType = ctx match
       case Context.Method(o, _) => o
@@ -311,8 +315,8 @@ private[mrpc] object MetadataDerivation:
    * `@rpcParamMetadata`. `key` resolves a `Map` key from an item; `elem` builds the metadata Expr for
    * an item at the slot's element type. `@single`/`@optional` arity-count mismatches are compile errors.
    */
-  private def collectionSlot[I](using
-    Quotes,
+  private def collectionSlot[I](
+    using Quotes,
   )(
     param: quotes.reflect.Symbol,
     paramTpe: quotes.reflect.TypeRepr,
@@ -365,9 +369,7 @@ private[mrpc] object MetadataDerivation:
    * wildcard like `MethodMeta[?]`). Each element is built at a more-specific type (`MethodMeta[op]`),
    * so it conforms; we ascribe the list to `E` via `List.apply[E]`.
    */
-  private def listOf(using
-    Quotes,
-  )(elemTpe: quotes.reflect.TypeRepr, elems: List[Expr[Any]]): Expr[Any] =
+  private def listOf(using Quotes)(elemTpe: quotes.reflect.TypeRepr, elems: List[Expr[Any]]): Expr[Any] =
     import quotes.reflect.*
     elemTpe.asType match
       case '[e] =>
@@ -380,9 +382,7 @@ private[mrpc] object MetadataDerivation:
    * `ParamMeta[paramType]`) so the `@infer` slot summons against the right `T`. When the element type
    * is not applied (no type param) it is returned unchanged.
    */
-  private def specialize(using
-    Quotes,
-  )(elemTpe: quotes.reflect.TypeRepr, real: Type[?]): quotes.reflect.TypeRepr =
+  private def specialize(using Quotes)(elemTpe: quotes.reflect.TypeRepr, real: Type[?]): quotes.reflect.TypeRepr =
     import quotes.reflect.*
     elemTpe match
       case AppliedType(tycon, _ :: Nil) => tycon.appliedTo(TypeRepr.of(using real))

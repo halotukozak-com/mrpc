@@ -87,7 +87,7 @@ private[mrpc] object Matcher:
     // Names come from the single authority `RpcNames[T]` (type-level `Names`, read back by `namesOf`).
     // `namesOf` falls back to a direct `computeAll` when the mirror can't be summoned, so the
     // duplicate-name abort still surfaces verbatim (see CompileErrorSuite).
-    val resolvedNames = RpcNames.namesOf[T]
+    val resolvedNames = RpcNames.namesOf[T](RpcNames.summonNames[T])
     ops.zip(resolvedNames).zipWithIndex.map { case ((op, name), index) =>
       planOne(op, name, index)
     }

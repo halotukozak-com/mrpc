@@ -234,4 +234,3 @@ object AsRawDerivation:
     // `plan.opType` from THIS SAME mirror, so the runtime element IS exactly that operation type.
     plan.opType match
       case '[op] => '{ $done.operations.productElement(${ Expr(plan.index) }).asInstanceOf[op] }
-

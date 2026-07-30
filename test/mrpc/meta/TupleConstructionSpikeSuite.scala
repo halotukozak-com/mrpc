@@ -3,16 +3,17 @@ package mrpc.meta
 import made.*
 
 import mrpc.derive.SampleApi.SampleApi
-import mrpc.derive.TupleConstructionSpike
 
 /**
  * Wave-0 type-preserving tuple-construction spike (Phase 10, Plan 01, Task 3).
  *
  * Resolves the CENTRAL locked-design risk (research §"Heterogeneous-Tuple Construction"): keeping
  * `done.operations` as the precisely-typed heterogeneous tuple — never widening to
- * `List[DoneOperation]` — through both an INLINE `mapAs` transform and a MACRO-side
- * `ofRefinedTuple` synthesis (see [[mrpc.derive.TupleConstructionSpike]]), both clean under
- * `-Ycheck:macros`.
+ * `List[DoneOperation]` — through an INLINE `mapAs` transform, clean under `-Ycheck:macros`.
+ *
+ * (A macro-side counterpart once explored building a precisely-typed refined tuple of per-op Exprs
+ * for this same risk; the macro that actually shipped, `AsRealDerivation`, took the simpler route of
+ * a widened `Tuple` instead, so that half of the spike was removed as unused.)
  *
  * Note on the inline path: made's own `MappedTupleEvidenceTest` documents that reading a
  * per-element macro (`getAnnotation`/`label`) INSIDE `mapAs` does NOT compile — the element is seen
@@ -36,13 +37,16 @@ class TupleConstructionSpikeSuite extends munit.FunSuite:
     val arities =
       done.operations
         .mapAs[made.DoneOperation][[o <: made.DoneOperation] =>> Int]([o <: made.DoneOperation] =>
-          (op: o) => op.inputElems.size)
+          (op: o) => op.inputElems.size,
+        )
     assertEquals(arities.size, opCount)
 
     // The refined per-op metadata read uses the tuple-level delegation surface (per-element, no
     // `done.operations.toList` first) plus destructuring to keep refinement.
     val names: List[Option[String]] =
-      done.operations.getAnnotations[mrpc.annotation.rpcName].toList
+      done.operations
+        .getAnnotations[mrpc.annotation.rpcName]
+        .toList
         .map(_.asInstanceOf[Option[mrpc.annotation.rpcName]].map(_.name))
     assertEquals(names.size, opCount)
     assert(names.exists(_.contains("findOne")))
@@ -50,13 +54,3 @@ class TupleConstructionSpikeSuite extends munit.FunSuite:
     // First op's label resolves through destructuring (refinement preserved).
     val (pingOp *: _) = done.operations: @unchecked
     assertEquals(pingOp.label, "ping")
-
-  test("macro-side ofRefinedTuple synthesis is -Ycheck:macros clean and yields the op labels"):
-    // Builds a refined tuple of Expr[String] (one label per op), folds with the ofRefinedTuple
-    // clone, and unpacks back to a List[String]. Compiling under -Ycheck:macros is the proof.
-    val labels = TupleConstructionSpike.opLabels[SampleApi]
-    assertEquals(labels.size, opCount)
-    assertEquals(
-      labels.toSet,
-      Set("ping", "increment", "find", "users", "lookup", "combine", "echoBool", "findRenamed"),
-    )
