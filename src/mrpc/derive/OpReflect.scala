@@ -34,15 +34,9 @@ private[mrpc] sealed trait Param:
  */
 private[mrpc] object OpReflect:
 
-  /** The op's (or param's) `Label` singleton-string member as a plain `String`. */
-  def labelOf(opType: Type[?])(using Quotes): String =
-    opType.runtimeChecked match
-      case '[type l <: String; { type Label = l }] =>
-        Type.valueOfConstant[l].getOrElse(quotes.reflect.report.errorAndAbort("Label is not a string literal")).toString
-
   /** `true` when the param carries a `@verbatim` annotation. */
-  def paramHasVerbatim(paramType: Type[?])(using Quotes): Boolean =
-    metadataEntries(paramType).exists(isAnnotation[mrpc.annotation.verbatim])
+  def paramHasVerbatim[m <: Tuple: Type](using Quotes): Boolean =
+    TupleTraverse.traverseTuple[m, Boolean].exists(isAnnotation[mrpc.annotation.verbatim])
 
   /**
    * The op's per-parameter-list arities, read off its `ParamLists` (a tuple of singleton `Int`s).
@@ -95,11 +89,6 @@ private[mrpc] object OpReflect:
     TypeRepr.of[T].typeSymbol.isAbstractType
 
   // --- internals ---
-
-  def paramOf(elemType: Type[?])(using Quotes): Type[? <: Param] = elemType match
-    case '[InputElem { type Label = l; type Type = t; type Metadata = m }] =>
-      Type.of[Param { type Label = l; type ParamType = t; type Metadata = m }]
-    case _ => quotes.reflect.report.errorAndAbort(s"could not build Param for ${Type.show(using elemType)}")
 
   /** Locates an annotation term of type `A` in the op's `Metadata`, like made's `getAnnotationImpl`. */
   private def findAnnotation[A: Type](using q: Quotes)(opType: Type[?]): Option[q.reflect.Term] =

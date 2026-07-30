@@ -44,7 +44,10 @@ private[mrpc] object MetadataDerivation:
    */
   private enum Context:
     /** The whole real trait: ops + their resolved names, in `Done` order. */
-    case Trait(ops: List[Type[?]], resolvedNames: List[Type[? <: String]])
+    case Trait[Ops <: Tuple /* of DoneOperation */, Names <: Tuple /* of String */ ](
+      ops: Type[Ops],
+      resolvedNames: Type[Names],
+    )
 
     /** A single RPC method/op (its refined `DoneOperation` type + resolved rpcName). */
     case Method[Op, Name <: String](opType: Type[Op], resolvedName: Type[Name])
@@ -53,14 +56,12 @@ private[mrpc] object MetadataDerivation:
     case Param[P <: mrpc.derive.Param](param: Type[P])
 
   def impl[M[_]: Type, Real: Type](done: Expr[Done.Of[Real]], names: Expr[RpcNames[Real]])(using Quotes)
-    : Expr[M[Real]] =
-
-    val ops = done match
-      case '{ type operations <: Tuple; $_ : Done { type Operations = operations } } =>
-        TupleTraverse.traverseTuple[operations, DoneOperation]
-    val values = RpcNames.namesOf[Real](names)
-
-    buildValue[M[Real]](Context.Trait(ops, values)).asExprOf[M[Real]]
+    : Expr[M[Real]] = (done, names).runtimeChecked match
+    case (
+          '{ type operations <: Tuple; $_ : Done { type Operations = operations } },
+          '{ type values <: Tuple; $_ : RpcNames[Real] { type Names = values } },
+        ) =>
+      buildValue[M[Real]](Context.Trait(Type.of[operations], Type.of[values])).asExprOf[M[Real]]
 
   /**
    * Builds `new MetaTpe(<filled params>)` by classifying each primary-constructor param of `metaTpe`
@@ -259,15 +260,16 @@ private[mrpc] object MetadataDerivation:
   )(using Quotes,
   ): Expr[Any] =
     import quotes.reflect.*
-    val (ops, names) = ctx match
-      case Context.Trait(o, n) => (o, n)
+    val opsNames = ctx match
+      case Context.Trait('[type ops <: Tuple; ops], '[type names <: Tuple; names]) =>
+        TupleTraverse.traverseTuple[ops, DoneOperation] zip TupleTraverse.traverseTuple[names, String]
       case _ => report.errorAndAbort("@rpcMethodMetadata is only valid at the trait level")
 
-    collectionSlot[(Type[?], Type[? <: String]), P](
+    collectionSlot[(Type[? <: DoneOperation], Type[? <: String]), P](
       paramName,
       arity,
       "@rpcMethodMetadata",
-      ops.zip(names),
+      opsNames,
       key = it => it._2,
       elem = [elem: Type] =>
         p =>
@@ -301,7 +303,10 @@ private[mrpc] object MetadataDerivation:
         case '[type elems <: Tuple; DoneOperation {
               type InputElems = elems
             }] =>
-          TupleTraverse.traverseTuple[elems, InputElem].map(OpReflect.paramOf),
+          TupleTraverse.traverseTuple[elems, InputElem].map {
+            case '[InputElem { type Label = l; type Type = t; type Metadata = m }] =>
+              Type.of[Param { type Label = l; type ParamType = t; type Metadata = m }]
+          },
       key = {
         case '[type label <: String; { type Label = label }] =>
           Type.of[label]

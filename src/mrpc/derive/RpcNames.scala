@@ -1,7 +1,6 @@
 package mrpc.derive
 
 import made.{Done, DoneOperation, InputElem}
-import mrpc.derive.OpReflect.paramOf
 
 import scala.quoted.*
 
@@ -56,16 +55,17 @@ object RpcNames:
         if overloaded && !OpReflect.hasAnnotation[mrpc.annotation.rpcName](op) then prefixed + overloadSuffix(op)
         else prefixed
 
-    val labels = ops.map(OpReflect.labelOf)
+    val labels = ops.map{
+      case '[type l <: String; { type Label = l }] => Type.valueOfConstant[l].getOrElse(report.errorAndAbort("Label is not a string literal")).toString
+    }
 
     detectDuplicates(labels, resolved)
 
     // Fold the resolved names into a singleton-string tuple type `n1 *: n2 *: ... *: EmptyTuple`.
-    val namesTupleType: TypeRepr = resolved.foldRight(TypeRepr.of[EmptyTuple]) { (n, acc) =>
+    val namesTupleType: TypeRepr = resolved.foldRight(TypeRepr.of[EmptyTuple]): (n, acc) =>
       (ConstantType(StringConstant(n)).asType, acc.asType) match
         case ('[type s <: String; s], '[type r <: Tuple; r]) => TypeRepr.of[s *: r]
         case _ => acc
-    }
 
     namesTupleType.asType.runtimeChecked match
       case '[type ns <: Tuple; ns] =>
@@ -78,7 +78,10 @@ object RpcNames:
         }
 
   private def baseName(op: Type[?])(using Quotes): String =
-    OpReflect.stringAnnotationArg[mrpc.annotation.rpcName](op, "name").getOrElse(OpReflect.labelOf(op))
+    OpReflect
+      .stringAnnotationArg[mrpc.annotation.rpcName](op, "name")
+      .getOrElse(op match
+        case '[type l <: String; { type Label = l }] => Type.valueOfConstant[l].get)
 
   /** Applies `@rpcNamePrefix` per its `overloadedOnly` flag. */
   private def applyPrefix(op: Type[?], base: String, overloaded: Boolean)(using Quotes): String =
@@ -99,9 +102,8 @@ object RpcNames:
       case '[type elems <: Tuple; DoneOperation { type InputElems = elems }] =>
         TupleTraverse
           .traverseTuple[elems, InputElem]
-          .map(paramOf)
           .map:
-            case '[Param { type ParamType = t }] => Type.show[t]
+            case '[{ type Type = t }] => Type.show[t]
           .mkString("(", ",", ")")
     val hash = sig.hashCode & 0x7fffffff
     s"_${hash.toHexString}"

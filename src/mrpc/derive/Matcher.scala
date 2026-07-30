@@ -1,7 +1,6 @@
 package mrpc.derive
 
 import made.{Done, DoneOperation, InputElem}
-import mrpc.derive.OpReflect.paramOf
 
 import scala.concurrent.Future
 import scala.quoted.*
@@ -71,12 +70,13 @@ private[mrpc] object Matcher:
       case '{ type operations <: Tuple; $_ : { type Operations = operations } } =>
         TupleTraverse.traverseTuple[operations, DoneOperation]
     val resolvedNames = RpcNames.namesOf[T](names)
-    val label = Type.valueOfConstant[L].getOrElse(report.errorAndAbort("L must be a literal string")).toString
-    val idx = ops.indexWhere(op => OpReflect.labelOf(op) == label)
-    if idx < 0 then report.errorAndAbort(s"no operation labeled '$label' in ${TypeRepr.of[T].show}")
+    val idx = ops.indexWhere { case '[type label <: String; { type Label = label }] =>
+      Type.of[label] == Type.of[L]
+    }
+    if idx < 0 then report.errorAndAbort(s"no operation labeled '${Type.show[L]}' in ${TypeRepr.of[T].show}")
     planOne((ops(idx), resolvedNames(idx))) match
       case '[type p <: OpPlan; p] => '{ null.asInstanceOf[p] }
-      case _ => report.errorAndAbort(s"could not build OpPlan for label '$label'")
+      case _ => report.errorAndAbort(s"could not build OpPlan for label '${Type.show[L]}'")
 
   /**
    * Like [[planFor]], but returns EVERY operation sharing label `L` as a tuple (declaration order) —
@@ -97,7 +97,7 @@ private[mrpc] object Matcher:
         TupleTraverse.traverseTuple[operations, DoneOperation]
     val resolvedNames = RpcNames.namesOf[T](names)
     val label = Type.valueOfConstant[L].getOrElse(report.errorAndAbort("L must be a literal string")).toString
-    val matches = ops.zip(resolvedNames).filter((op, _) => OpReflect.labelOf(op) == label)
+    val matches = ops.zip(resolvedNames).collect { case r @ ('[{ type Label = L }], _) => r }
     if matches.isEmpty then report.errorAndAbort(s"no operation labeled '$label' in ${TypeRepr.of[T].show}")
     val nulls: List[Expr[Any]] = matches.map(planOne).map { case '[type p <: OpPlan; p] =>
       '{ null.asInstanceOf[p] }
@@ -114,7 +114,16 @@ private[mrpc] object Matcher:
       case '[{ type OutputType = other }] => Type.of[ArityTag.GetOf[other]]
     val paramsType: Type[? <: Tuple] = TupleTraverse.foldTuple(opType match
       case '[type elems <: Tuple; DoneOperation { type InputElems = elems }] =>
-        TupleTraverse.traverseTuple[elems, InputElem].map(paramOf).map(planParam))
+        TupleTraverse
+          .traverseTuple[elems, InputElem]
+          .map { case '[type m <: Tuple; InputElem { type Label = l; type Type = t; type Metadata = m }] =>
+            val encodingType =
+              if OpReflect.paramHasVerbatim[m] && OpReflect.isRawCarrier[t] then Type.of[EncodingTag.Verbatim]
+              else Type.of[EncodingTag.Encoded]
+            encodingType match
+              case '[type e <: EncodingTag; e] =>
+                Type.of[ParamPlan { type Label = l; type ParamType = t; type Encoding = e }]
+          })
 
     // Under the fixed-RawRpc model the result is always encoded via the summoned leaf bridge unless
     // it is itself Raw; @verbatim on a non-Raw result has no identity to land on. Result-verbatim is
@@ -138,23 +147,3 @@ private[mrpc] object Matcher:
           },
         ]
       case _ => report.errorAndAbort(s"could not build OpPlan for operation ${TypeRepr.of(using opType).show}")
-
-  /**
-   * Per-param encode-vs-verbatim plan. Documented mrpc divergence from commons: commons makes
-   * `@single`/`@optional` params verbatim by default because its raw type is concrete and often
-   * equals the param type. mrpc keeps `Raw` abstract, so the only way a value reaches `Raw` is the
-   * leaf codec bridge — every value param is `Encoded` by default. `@verbatim` yields `Verbatim` ONLY
-   * when the param's declared type already IS the abstract `Raw` (rare; e.g. a pass-through transport).
-   * Since `Raw` is not in scope as a concrete type in this standalone matcher, the verbatim branch is
-   * gated on `@verbatim` being present AND the param type being an abstract/opaque carrier; in the
-   * fixed-String fixtures no param is `Raw`, so this resolves to `Encoded`, matching the divergence.
-   */
-  private def planParam(param: Type[?])(using Quotes): Type[?] = param match
-    case '[Param { type ParamType = t }] =>
-      val encodingType: Type[? <: EncodingTag] =
-        if OpReflect.paramHasVerbatim(param) && OpReflect.isRawCarrier[t] then Type.of[EncodingTag.Verbatim]
-        else Type.of[EncodingTag.Encoded]
-      (param, encodingType) match
-        case ('[type l <: String; { type Label = l }], '[type e <: EncodingTag; e]) =>
-          Type.of[ParamPlan { type Label = l; type ParamType = t; type Encoding = e }]
-        case _ => quotes.reflect.report.errorAndAbort(s"could not build ParamPlan for param")
