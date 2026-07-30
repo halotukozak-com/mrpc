@@ -66,7 +66,7 @@ private[mrpc] object MetadataDerivation:
    * Builds `new MetaTpe(<filled params>)` by classifying each primary-constructor param of `metaTpe`
    * against the given real-symbol [[Context]].
    */
-  private def buildValue[M: Type](ctx: Context)(using Quotes): Expr[Any] =
+  private def buildValue[M: Type](ctx: Context)(using Quotes): Expr[M] =
     import quotes.reflect.*
 
     val metaTpe = TypeRepr.of[M]
@@ -83,9 +83,7 @@ private[mrpc] object MetadataDerivation:
     val caseFieldsByName: Map[String, Symbol] = clsSym.caseFields.map(f => f.name -> f).toMap
 
     val argExprs: List[Expr[Any]] = termParams.map { p =>
-      val paramTpe = caseFieldsByName.get(p.name) match
-        case Some(field) => metaTpe.memberType(field)
-        case None => metaTpe.memberType(p)
+      val paramTpe = metaTpe.memberType(caseFieldsByName.getOrElse(p.name, p))
       paramTpe.asType match
         case '[param] =>
           fillParam[param](p, ctx)
@@ -94,13 +92,12 @@ private[mrpc] object MetadataDerivation:
     // `new MetaTpe[targs](args)` via the compiler-synthesized `Mirror.Product` for `MetaTpe` — no
     // constructor tree to synthesize by hand: `fromProduct` positionally applies `argExprs` (any
     // `Product`, so a plain args tuple suffices) through the class's actual primary constructor.
-    metaTpe.asType match
-      case '[t] =>
-        '{
-          scala.compiletime
-            .summonInline[scala.deriving.Mirror.ProductOf[t]]
-            .fromProduct(${ Expr.ofRefinedTuple(argExprs) })
-        }
+
+    '{
+      scala.compiletime
+        .summonInline[scala.deriving.Mirror.ProductOf[M]]
+        .fromProduct(${ Expr.ofRefinedTuple(argExprs) })
+    }
 
   /** Classifies a single ctor param by its steering annotation and builds its value Expr. */
   private def fillParam[Param: Type](using Quotes)(param: quotes.reflect.Symbol, ctx: Context): Expr[Any] =
@@ -273,14 +270,13 @@ private[mrpc] object MetadataDerivation:
       "@rpcMethodMetadata",
       ops.zip(names),
       key = it => it._2,
-      elem = {
-        case ('[type f[_]; f], ('[real], resolvedName)) =>
-          buildValue[f[real]](Context.Method(Type.of[real], resolvedName))
-        case ('[elemTpe], ('[real], resolvedName)) =>
-
-          buildValue[elemTpe](Context.Method(Type.of[real], resolvedName))
-        case (_, _) => ???
-      },
+      elem = [elem: Type] =>
+        p =>
+          p.runtimeChecked match
+            case ('[real], resolvedName) =>
+              Type.of[elem] match
+                case '[type f[_] <: elem; f] => buildValue[f[real]](Context.Method(Type.of[real], resolvedName))
+                case _ => buildValue[elem](Context.Method(Type.of[real], resolvedName)),
     )
 
   /**
@@ -313,13 +309,13 @@ private[mrpc] object MetadataDerivation:
           Type.of[label]
         case _ => ???
       },
-      elem = {
-        case ('[type f[_]; f], p @ '[Param { type ParamType = paramType }]) =>
-          buildValue[f[paramType]](Context.Param(p))
-        case ('[elemTpe], p) =>
-          buildValue[elemTpe](Context.Param(p))
-        case _ => ???
-      },
+      elem = [elem: Type] =>
+        p =>
+          p match
+            case '[Param { type ParamType = paramType }] =>
+              Type.of[elem] match
+                case '[type f[_] <: elem; f] => buildValue[f[paramType]](Context.Param(p))
+                case _ => buildValue[elem](Context.Param(p)),
     )
 
   /**
@@ -335,7 +331,7 @@ private[mrpc] object MetadataDerivation:
     marker: String,
     items: List[I],
     key: I => Type[? <: String],
-    elem: (Type[?], I) => Expr[Any], // [T:Type] => I => Expr[T]  ?
+    elem: [T: Type] => (I) => Expr[T],
   ): Expr[Any] =
     import quotes.reflect.*
     arity match
@@ -344,12 +340,12 @@ private[mrpc] object MetadataDerivation:
           case '[Map[String, e]] =>
             val entries: List[Expr[(String, e)]] = items.map { it =>
               val k = Expr(Type.valueOfConstant(using key(it)).get)
-              val v = elem(Type.of[e], it).asExprOf[e]
+              val v = elem[e](it)
               '{ ($k, $v) }
             }
             '{ Map(${ Varargs(entries) }*) }
           case '[List[e]] =>
-            Expr.ofList(items.map(it => elem(Type.of[e], it)).map(_.asExprOf[e])).asExprOf[List[e]]
+            Expr.ofList(items.map(it => elem[e](it))).asExprOf[List[e]]
           case _ =>
             report.errorAndAbort(s"$marker @multi slot must be a List[_] or Map[String, _]; got ${Type.show[Param]}")
       case SlotArity.Optional =>
@@ -357,7 +353,7 @@ private[mrpc] object MetadataDerivation:
           case '[Option[e]] =>
             items match
               case Nil => '{ None }
-              case it :: Nil => '{ Some(${ elem(Type.of[e], it).asExprOf[e] }) }
+              case it :: Nil => '{ Some(${ elem[e](it) }) }
               case _ =>
                 report.errorAndAbort(
                   s"$marker @optional slot '${param.name}' matched ${items.size} elements; expected 0 or 1",
@@ -366,7 +362,7 @@ private[mrpc] object MetadataDerivation:
             report.errorAndAbort(s"$marker @optional slot must be an Option[_]; got ${Type.show[Param]}")
       case SlotArity.Single =>
         items match
-          case it :: Nil => elem(Type.of[Param], it)
+          case it :: Nil => elem[Param](it)
           case other =>
             report.errorAndAbort(
               s"$marker @single slot '${param.name}' requires exactly one match; got ${other.size}",
