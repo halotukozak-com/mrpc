@@ -47,10 +47,10 @@ private[mrpc] object MetadataDerivation:
     case Trait(ops: List[Type[?]], resolvedNames: List[Type[? <: String]])
 
     /** A single RPC method/op (its refined `DoneOperation` type + resolved rpcName). */
-    case Method(opType: Type[?], resolvedName: Type[? <: String])
+    case Method[Op, Name <: String](opType: Type[Op], resolvedName: Type[Name])
 
     /** A single RPC parameter (a refined [[OpReflect.Param]] type). */
-    case Param(param: Type[? <: mrpc.derive.Param])
+    case Param[P <: mrpc.derive.Param](param: Type[P])
 
   def impl[M[_]: Type, Real: Type](done: Expr[Done.Of[Real]], names: Expr[RpcNames[Real]])(using Quotes)
     : Expr[M[Real]] =
@@ -115,8 +115,8 @@ private[mrpc] object MetadataDerivation:
       Expr(Type.valueOfConstant(using reifyName(ctx, useRaw)).get)
     else if has[mrpc.annotation.reifyAnnot] then reifyAnnot[Param](ctx, arity)
     else if has[mrpc.annotation.infer] then infer[Param](param)
-    else if has[mrpc.annotation.rpcMethodMetadata] then rpcMethodMetadata[Param](param, ctx, arity)
-    else if has[mrpc.annotation.rpcParamMetadata] then rpcParamMetadata[Param](param, ctx, arity)
+    else if has[mrpc.annotation.rpcMethodMetadata] then rpcMethodMetadata[Param](param.name, ctx, arity)
+    else if has[mrpc.annotation.rpcParamMetadata] then rpcParamMetadata[Param](param.name, ctx, arity)
     else
       report.errorAndAbort(
         s"metadata param '${param.name}' has no recognized steering annotation " +
@@ -253,11 +253,10 @@ private[mrpc] object MetadataDerivation:
    * Each element recurses `buildValue` in a per-op [[Context.Method]].
    */
   private def rpcMethodMetadata[P: Type](
-    using Quotes,
-  )(
-    param: quotes.reflect.Symbol,
+    paramName: String,
     ctx: Context,
     arity: SlotArity,
+  )(using Quotes,
   ): Expr[Any] =
     import quotes.reflect.*
     val (ops, names) = ctx match
@@ -265,7 +264,7 @@ private[mrpc] object MetadataDerivation:
       case _ => report.errorAndAbort("@rpcMethodMetadata is only valid at the trait level")
 
     collectionSlot[(Type[?], Type[? <: String]), P](
-      param,
+      paramName,
       arity,
       "@rpcMethodMetadata",
       ops.zip(names),
@@ -284,19 +283,18 @@ private[mrpc] object MetadataDerivation:
    * [[rpcMethodMetadata]]; `Map` slots are keyed by paramName.
    */
   private def rpcParamMetadata[P: Type](
-    using Quotes,
-  )(
-    param: quotes.reflect.Symbol,
+    paramName: String,
     ctx: Context,
     arity: SlotArity,
-  ): Expr[Any] =
+  )(using Quotes,
+  ): Expr[P] =
     import quotes.reflect.*
     val opType = ctx match
       case Context.Method(o, _) => o
       case _ => report.errorAndAbort("@rpcParamMetadata is only valid within a method context")
 
     collectionSlot[Type[? <: Param], P](
-      param,
+      paramName,
       arity,
       "@rpcParamMetadata",
       opType match
@@ -323,47 +321,46 @@ private[mrpc] object MetadataDerivation:
    * `@rpcParamMetadata`. `key` resolves a `Map` key from an item; `elem` builds the metadata Expr for
    * an item at the slot's element type. `@single`/`@optional` arity-count mismatches are compile errors.
    */
-  private def collectionSlot[I, Param: Type](
-    using Quotes,
-  )(
-    param: quotes.reflect.Symbol,
+  private def collectionSlot[I, P: Type](
+    paramName: String,
     arity: SlotArity,
     marker: String,
     items: List[I],
     key: I => Type[? <: String],
-    elem: [T: Type] => (I) => Expr[T],
-  ): Expr[Any] =
+    elem: [T: Type] => I => Expr[T],
+  )(using Quotes,
+  ): Expr[P] =
     import quotes.reflect.*
     arity match
       case SlotArity.Multi =>
-        Type.of[Param] match
+        Type.of[P] match
           case '[Map[String, e]] =>
             val entries: List[Expr[(String, e)]] = items.map { it =>
               val k = Expr(Type.valueOfConstant(using key(it)).get)
               val v = elem[e](it)
               '{ ($k, $v) }
             }
-            '{ Map(${ Varargs(entries) }*) }
+            '{ Map(${ Varargs(entries) }*) }.asExprOf[P]
           case '[List[e]] =>
-            Expr.ofList(items.map(it => elem[e](it))).asExprOf[List[e]]
+            Expr.ofList(items.map(it => elem[e](it))).asExprOf[List[e]].asExprOf[P]
           case _ =>
             report.errorAndAbort(s"$marker @multi slot must be a List[_] or Map[String, _]; got ${Type.show[Param]}")
       case SlotArity.Optional =>
-        Type.of[Param] match
+        Type.of[P] match
           case '[Option[e]] =>
             items match
-              case Nil => '{ None }
-              case it :: Nil => '{ Some(${ elem[e](it) }) }
+              case Nil => '{ None }.asExprOf[P]
+              case it :: Nil => '{ Some(${ elem[e](it) }) }.asExprOf[P]
               case _ =>
                 report.errorAndAbort(
-                  s"$marker @optional slot '${param.name}' matched ${items.size} elements; expected 0 or 1",
+                  s"$marker @optional slot '$paramName' matched ${items.size} elements; expected 0 or 1",
                 )
           case _ =>
             report.errorAndAbort(s"$marker @optional slot must be an Option[_]; got ${Type.show[Param]}")
       case SlotArity.Single =>
         items match
-          case it :: Nil => elem[Param](it)
+          case it :: Nil => elem[P](it)
           case other =>
             report.errorAndAbort(
-              s"$marker @single slot '${param.name}' requires exactly one match; got ${other.size}",
+              s"$marker @single slot '$paramName' requires exactly one match; got ${other.size}",
             )
