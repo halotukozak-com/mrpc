@@ -9,12 +9,14 @@ import scala.quoted.*
  * string types — one per operation, in `Done.Operations` order — equal to [[RpcName.computeAll]]'s
  * result. `names` is the same tuple as a runtime value.
  *
- * Unlike the per-op [[RpcName]] + `summonAll`, this derivation is **annotation-proof**: it walks
- * `Done.Operations` reflectively (annotations stay intact in `TypeRepr`) and runs the cross-op
- * resolution in one pass, so there is no per-op type-variable inference to drop a `MetaAnnotation`
- * (the wall that defeats `summonAll[Tuple.Map[Operations, RpcName]]` on annotated ops like `@multi`).
- * It reads `@rpcName`/`@rpcNamePrefix` terms and computes overload suffixes value-side, then EMITS the
- * resolved names as types — which is exactly what `Tuple.Map`/match types cannot do.
+ * Deliberately NOT a per-op typeclass derived independently for each operation and folded via
+ * `compiletime.summonAll[Tuple.Map[Done.Operations, RpcName]]`: that shape pushes each op through
+ * `Tuple.Map`'s per-element type-variable inference, which drops any `MetaAnnotation` the op carries
+ * (e.g. `@multi`) — annotations don't survive being abstracted into a generic type variable. Instead
+ * `RpcNames` walks `Done.Operations` reflectively in ONE PASS (annotations stay intact in `TypeRepr`),
+ * reads `@rpcName`/`@rpcNamePrefix` terms and computes overload suffixes value-side via
+ * [[RpcName.computeAll]], then EMITS the resolved names as types — which is exactly what
+ * `Tuple.Map`/match types cannot do. **Annotation-proof** by construction.
  */
 sealed trait RpcNames[T]:
   type Names <: Tuple
@@ -30,10 +32,8 @@ object RpcNames:
    * `RpcName.computeAll`. The mirror is summoned once via [[summonNames]] and threaded in.
    */
   private[derive] def namesOf[T: Type](rpcNames: Expr[RpcNames[T]])(using Quotes): List[String] =
-    rpcNames match
-      case '{ $_ : RpcNames[T] { type Names = ns } } =>
-        constNames[ns]
-      case _ => quotes.reflect.report.errorAndAbort("RpcNames instance has no concrete Names")
+    rpcNames.runtimeChecked match
+      case '{ $_ : RpcNames[T] { type Names = ns } } => constNames[ns]
 
   /** Lowers a tuple of singleton-string types to their `String` values via `Type.valueOfConstant`. */
   private def constNames[Ns: Type](using Quotes): List[String] =
@@ -45,7 +45,24 @@ object RpcNames:
 
   private def deriveImpl[T: Type](done: Expr[Done.Of[T]])(using Quotes): Expr[RpcNames[T]] =
     import quotes.reflect.*
-    val resolved: List[String] = RpcName.computeAll(Matcher.operationTypes[T](done))
+    val ops = Matcher.operationTypes[T](done)
+    val bases = ops.map(baseName)
+
+    // Group by base name to detect overloads: a base shared by >1 op is an overloaded set.
+    val baseCounts: Map[String, Int] = bases.groupBy(identity).view.mapValues(_.size).toMap
+
+    val resolved = ops
+      .zip(bases)
+      .map: (op, base) =>
+        val overloaded = baseCounts.getOrElse(base, 0) > 1
+        val prefixed = applyPrefix(op, base, overloaded)
+        // Only overloaded members without their own @rpcName disambiguation get the signature suffix.
+        if overloaded && !OpReflect.hasAnnotation[mrpc.annotation.rpcName](op) then prefixed + overloadSuffix(op)
+        else prefixed
+
+    val labels = ops.map(OpReflect.labelOf)
+
+    detectDuplicates(labels, resolved)
 
     // Fold the resolved names into a singleton-string tuple type `n1 *: n2 *: ... *: EmptyTuple`.
     val namesTupleType: TypeRepr = resolved.foldRight(TypeRepr.of[EmptyTuple]) { (n, acc) =>
@@ -54,7 +71,7 @@ object RpcNames:
         case _ => acc
     }
 
-    namesTupleType.asType match
+    namesTupleType.asType.runtimeChecked match
       case '[type ns <: Tuple; ns] =>
         val namesValue: Expr[Tuple] = Expr.ofRefinedTuple(resolved.map(Expr(_)))
         '{
@@ -63,4 +80,45 @@ object RpcNames:
             def names: Names = $namesValue.asInstanceOf[ns]
           ): RpcNames[T] { type Names = ns }
         }
-      case _ => report.errorAndAbort("resolved names did not form a Tuple type")
+
+  private def baseName(op: Type[?])(using Quotes): String =
+    OpReflect.stringAnnotationArg[mrpc.annotation.rpcName](op, "name").getOrElse(OpReflect.labelOf(op))
+
+  /** Applies `@rpcNamePrefix` per its `overloadedOnly` flag. */
+  private def applyPrefix(op: Type[?], base: String, overloaded: Boolean)(using Quotes): String =
+    OpReflect.stringAnnotationArg[mrpc.annotation.rpcNamePrefix](op, "prefix") match
+      case None => base
+      case Some(prefix) =>
+        val overloadedOnly =
+          OpReflect.booleanAnnotationArg[mrpc.annotation.rpcNamePrefix](op, "overloadedOnly").getOrElse(false)
+        if !overloadedOnly || overloaded then prefix + base else base
+
+  /**
+   * Deterministic, reorder-stable suffix for an overloaded method: `_` followed by a positive
+   * hexadecimal hash of the flattened parameter type `show` strings joined by a separator. Distinct
+   * signatures yield distinct suffixes; reordering the overloads does not change any one suffix.
+   */
+  private def overloadSuffix(op: Type[?])(using Quotes): String =
+    import quotes.reflect.*
+    val sig = OpReflect
+      .inputElems(op)
+      .map { p =>
+        val paramType = p.runtimeChecked match
+          case '[Param { type ParamType = t }] => Type.of[t]
+        TypeRepr.of(using paramType).show
+      }
+      .mkString("(", ",", ")")
+    val hash = sig.hashCode & 0x7fffffff
+    s"_${hash.toHexString}"
+
+  /** Aborts compilation if two non-overload ops compute the same final name. */
+  private def detectDuplicates(labels: List[String], resolved: List[String])(using Quotes): Unit =
+    import quotes.reflect.*
+    resolved
+      .zip(labels)
+      .groupMap((name, _) => name)((_, label) => label)
+      .find((_, ls) => ls.sizeIs > 1)
+      .foreach: (name, ls) =>
+        report.errorAndAbort(
+          s"duplicate RPC name '$name' computed for methods ${ls.mkString(", ")}; disambiguate with @rpcName",
+        )

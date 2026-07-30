@@ -159,16 +159,14 @@ object AsRealDerivation:
     ec: Expr[ExecutionContext],
   )(using Quotes,
   ): Expr[?] =
-    import quotes.reflect.*
-
     // Recover positional argument terms from the args tuple, each cast to its exact declared type, so
     // the per-param `AsRaw[Raw, t]` encoder applies as the source would. `A` carries no `Product`
     // bound (see `handlerFor`), so `args` is cast to `Product` here — safe, since every `A` this is
     // called with (`EmptyTuple` or a `NamedTuple`) IS one at runtime.
-    val flatArgTerms: List[Term] = paramsOf(plan).zipWithIndex.map { case (param, i) =>
+    val flatArgTerms: List[Expr[?]] = paramsOf(plan).zipWithIndex.map { case (param, i) =>
       param.paramType match
         case '[t] =>
-          '{ $args.asInstanceOf[Product].productElement(${ Expr(i) }).asInstanceOf[t] }.asTerm
+          '{ $args.asInstanceOf[Product].productElement(${ Expr(i) }).asInstanceOf[t] }
     }
 
     val invocation = invocationExpr[Raw](plan, flatArgTerms)
@@ -196,11 +194,12 @@ object AsRealDerivation:
    * per the op's `ParamLists` sizes — the exact inverse of the server adapter's `args.flatten`.
    */
   private def invocationExpr[Raw: Type](
-    using q: Quotes,
+    using quotes: Quotes,
   )(
     plan: Type[?],
-    flatArgTerms: List[q.reflect.Term],
+    flatArgTerms: List[Expr[Any]],
   ): Expr[RawInvocation[Raw]] =
+    import quotes.reflect.*
     val encodedArgs: List[Expr[Raw]] = paramsOf(plan).zip(flatArgTerms).map { case (param, argTerm) =>
       param.paramType match
         case '[t] =>
@@ -216,13 +215,8 @@ object AsRealDerivation:
       if nested.forall(_.isEmpty) then '{ Nil } else Expr.ofList(nestedExprs)
 
     val rpcName = plan.runtimeChecked match
-      case '[OpPlan { type RpcName = n }] =>
-        Type.of[n] match
-          case '[type nn <: String; nn] =>
-            Type
-              .valueOfConstant[nn]
-              .getOrElse(q.reflect.report.errorAndAbort("RpcName is not a string literal"))
-              .toString
+      case '[type n <: String; OpPlan { type RpcName = n }] =>
+        Type.valueOfConstant[n].getOrElse(report.errorAndAbort("RpcName is not a string literal"))
 
     '{ RawInvocation[Raw](${ Expr(rpcName) }, $argsExpr) }
 
