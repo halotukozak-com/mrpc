@@ -14,3 +14,14 @@ private[derive] object TupleTraverse:
     tpe match
       case '[EmptyTuple] => Nil
       case '[t *: ts] => Type.of[t] :: traverseTuple(Type.of[ts])
+
+  /** Folds element types into a `*:`-cons tuple type, in order — the inverse of [[traverseTuple]]. */
+  def foldTuple(elems: List[Type[?]])(using Quotes): Type[? <: Tuple] =
+    import quotes.reflect.*
+    val folded: TypeRepr = elems.foldRight(TypeRepr.of[EmptyTuple]) { (elem, acc) =>
+      (elem, acc.asType) match
+        case ('[h], '[type t <: Tuple; t]) => TypeRepr.of[h *: t]
+        case _ => acc
+    }
+    folded.asType match
+      case '[type r <: Tuple; r] => Type.of[r]

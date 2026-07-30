@@ -1,50 +1,63 @@
 package mrpc.derive
 
-import scala.quoted.*
-
 /**
- * Compile-time-only data model produced by the matcher: the standalone, independently-testable
- * classification of one operation into its arity, resolved rpcName, and per-parameter encode plan.
- *
- * These case classes carry `Type[?]`/`String` values that exist only inside a macro expansion — they
- * are NOT runtime data types. The matcher builds an `OpPlan` per operation; the server adapter and
- * client proxy macros (later) consume it to summon codecs and assemble dispatch. For test assertions
- * the matcher also exposes a flattened runtime [[OpDescriptor]] (see [[Matcher.describe]]).
+ * Type-level tag for which `RawRpc` dispatch method (`fire`/`call`/`get`) an operation routes to.
+ * `Call`/`Get` carry their payload (the `Future` result type / the sub-RPC type) as a type member, so
+ * it survives as part of an [[OpPlan]]'s own type. The matcher, the two materialize macros, and
+ * [[Matcher.describe]]'s test-facing projection all classify arity by quote-pattern-matching this
+ * type directly (`case '[ArityTag.Fire] => ...` / `case '[ArityTag.CallOf[r]] => ...`) — there is no
+ * separate value-level enum to keep in sync with it.
  */
-private[derive] enum Arity:
-  case Fire
-  case Call(resultType: Type[?])
-  case Get(subRpcType: Type[?])
+private[derive] sealed trait ArityTag
+private[derive] object ArityTag:
+  sealed trait Fire extends ArityTag
+  sealed trait Call extends ArityTag:
+    type Result
+  sealed trait Get extends ArityTag:
+    type Sub
 
-private[derive] enum Encoding:
-  case Encoded
-  case Verbatim
-
-private[derive] final case class ParamPlan(
-  label: String,
-  paramType: Type[?],
-  encoding: Encoding,
-)
-
-private[derive] final case class OpPlan(
-  label: String,
-  rpcName: String,
-  arity: Arity,
-  params: List[ParamPlan],
-  resultEncoding: Encoding,
-  // The operation's refined `DoneOperation` type and its position in `Done.Operations`. The
-  // materialize macros need both to select the exact operation term off the mirror and call the
-  // type-safe `Done.invoke`. They are macro-only payloads (like `paramType`), absent from the
-  // runtime `OpDescriptor` projection.
-  opType: Type[?],
-  index: Int,
-)
+  type CallOf[R] = Call { type Result = R }
+  type GetOf[S] = Get { type Sub = S }
 
 /**
- * Flattened, runtime-comparable projection of an [[OpPlan]] — the test-facing output of the matcher.
- * Because `OpPlan` carries `Type[?]` values that only exist during macro expansion, the suites assert
- * against this plain case class instead (arity rendered as a tag, the carried result/sub-RPC type as
- * its `show` string, and per-param encodings as comparable strings).
+ * Type-level encode-vs-verbatim tag, classified the same way as [[ArityTag]] — via quote-pattern
+ * matching directly on the type, no value-level enum counterpart.
+ */
+private[derive] sealed trait EncodingTag
+private[derive] object EncodingTag:
+  sealed trait Encoded extends EncodingTag
+  sealed trait Verbatim extends EncodingTag
+
+/**
+ * One parameter's plan, at the type level: its label, declared type, and encode-vs-verbatim tag.
+ * [[OpPlan.Params]] is a `Tuple` of these — the parameter-level counterpart of [[OpPlan]] itself.
+ */
+private[derive] sealed trait ParamPlan:
+  type Label <: String
+  type ParamType
+  type Encoding <: EncodingTag
+
+/**
+ * One operation's classification, at the type level: arity, resolved rpcName, per-parameter encode
+ * plan, and the underlying `DoneOperation` this plan describes. [[Matcher.planAll]] builds a
+ * `Plans <: Tuple` of these — one per `Done.Operations` entry, in the same order, so a plan's
+ * position in `Plans` (equivalently, in [[Matcher.plans]]'s resulting list) IS its `Done.Operations`
+ * index. Mirrors how made's `Done` models `T` as a `Tuple` of `DoneOperation`s; read back via
+ * [[PlanReflect]].
+ */
+private[derive] sealed trait OpPlan:
+  type Label <: String
+  type RpcName <: String
+  type ArityInfo <: ArityTag
+  type Params <: Tuple
+  type ResultEncoding <: EncodingTag
+  type OpType
+
+/**
+ * Flattened, runtime-comparable projection of one [[OpPlan]] — the test-facing output of the matcher.
+ * Because an [[OpPlan]] is a TYPE (carrying `Type[?]`-only information), the suites assert against
+ * this plain case class instead (arity rendered as a tag, the carried result/sub-RPC type as its
+ * `show` string, and per-param encodings as comparable strings) — see [[Matcher.describe]].
  */
 final case class OpDescriptor(
   label: String,

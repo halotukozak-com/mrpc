@@ -44,17 +44,21 @@ object AsRealDerivation:
   /**
    * Builds the proxy via made's `Done.materialize`: one handler per plan — shaped to match made's
    * [[Done.HandlerOf]] (a no-param op expects `() => OutputType`; a parametric op expects a
-   * `NamedTuple => OutputType`) — collected into a plain `Tuple` and handed to `.to[Real]`.
+   * `NamedTuple => OutputType`) — collected via [[Expr.ofRefinedTuple]] into a precisely-typed
+   * heterogeneous tuple and handed to `.to[Real]`.
    *
    * made's `materializeImpl` reads handler `i` via `productElement(i)` rather than a
-   * `Handlers`-typed symbol lookup, so the handler tuple never needs to be ascribed to the precise
-   * `Done.HandlersOf[Operations]` (or any other concrete) type — the widened `Tuple` the handlers are
-   * collected into is enough. `to` is given the mirror plus `made.ValidHandlers.refl` as its
-   * handler/operation correspondence evidence: mrpc builds exactly one handler per operation, in
-   * `Done.Operations` order, each shaped to `Done.HandlerOf[op]` (see `handlerFor`), so the handler
-   * tuple IS `Done.HandlersOf[Operations]` by construction, and `refl[mirror.Operations, Tuple]` is the
-   * macro-side witness for that — used in place of the auto-`given`
-   * (`ValidHandlers[Ops, Done.HandlersOf[Ops]]`), which a plain `Tuple` can never satisfy structurally.
+   * `Handlers`-typed symbol lookup, so the handler tuple no longer needs to be ascribed to a concrete
+   * `TupleN` for that to work — `ofRefinedTuple`'s natural per-element-precise `*:`-chain is enough.
+   * `to` is still given `made.ValidHandlers.refl` as its handler/operation correspondence evidence
+   * (rather than relying on the auto-`given ValidHandlers[Ops, H](using H <:< Done.HandlersOf[Ops])`):
+   * even with `Handlers` now correctly inferred as the precise `hs`, `Done.HandlersOf[mirror.Operations]`
+   * doesn't itself reduce far enough for that implicit search to succeed, since it's a match type over
+   * the still-abstract, path-dependent `mirror.Operations` — the same wall `OpReflect` exists to route
+   * around elsewhere. `refl[mirror.Operations, hs]` is the macro-side witness for that instead: mrpc
+   * builds exactly one handler per operation, in `Done.Operations` order, each shaped to
+   * `Done.HandlerOf[op]` (see `handlerFor`), so the handler tuple IS `Done.HandlersOf[Operations]` by
+   * construction.
    */
   private def materializeProxyImpl[Raw: Type, Real: Type](
     raw: Expr[RawRpc[Raw]],
@@ -62,43 +66,76 @@ object AsRealDerivation:
     ec: Expr[ExecutionContext],
   )(using Quotes,
   ): Expr[Real] =
-    val plans = Matcher.planAll[Real](done)
+    val plans = Matcher.plans[Real](done)
     val handlers: List[Expr[Any]] = plans.map(plan => handlerFor[Raw](raw, plan, ec))
-    val handlersTuple: Expr[Tuple] = Expr.ofTupleFromSeq(handlers)
-    '{
-      given d: Done.Of[Real] = $done
-      $handlersTuple.to[Real](using d)(using compiletime.summonInline)
-    }
+    // `ofRefinedTuple` keeps each handler's own precise type through the fold, so pattern-matching its
+    // result back to a bound type `hs` (rather than stashing it in a `val: Expr[Tuple]`, which would
+    // widen it right back down) lets the quote below see the handler tuple at that PRECISE type —
+    // `.to[Real]`'s `Handlers` type parameter is correctly inferred as `hs`, not a widened `Tuple`.
+    // `Done.HandlersOf[mirror.Operations]` still doesn't itself reduce far enough for the implicit
+    // search backing the auto-`given ValidHandlers` to see `hs <:< HandlersOf[Operations]` — that match
+    // type is over the path-dependent, still-abstract `mirror.Operations`, the same wall `OpReflect`
+    // exists to route around elsewhere — so `refl[mirror.Operations, hs]` is still needed as the
+    // macro-side witness. It is at least honest now: `hs` is what the handlers actually build, not a
+    // stand-in `Tuple`.
+    Expr.ofRefinedTuple(handlers) match
+      case '{ type hs <: Tuple; $handlersTuple: hs } =>
+        '{
+          // Reuses the SAME mirror `plans` above was already classified from — no need to
+          // re-derive one via `Done.derived[Real]`. Bound to a local `val` (rather than projecting
+          // off `$done` directly) so `.Operations` is a stable path `to`/`refl` can reference; `$done`
+          // itself need not denote a stable path (e.g. it may be a `summon[Done.Of[Real]]` call).
+          val mirror: Done.Of[Real] = $done
+          $handlersTuple.to[Real](using mirror)(using ValidHandlers.refl[mirror.Operations, hs])
+        }
 
   /**
-   * One operation's handler, shaped to made's [[Done.HandlerOf]]: a no-param op becomes `() =>
-   * OutputType`; a parametric op becomes `<args> => OutputType` where `<args>` is the operation's
-   * (named) argument tuple. made invokes the handler with the argument tuple, which is destructured
-   * back into positional argument terms (each cast to its exact param type), encoded, packaged into a
-   * [[RawInvocation]], and dispatched by arity.
+   * One operation's handler, shaped EXACTLY to made's [[Done.HandlerOf]]: a no-param op becomes `() =>
+   * OutputType`; a parametric op becomes `NamedTuple[names, types] => OutputType`, built via
+   * [[namedArgsType]] so the lambda's parameter is precisely the shape `Done.HandlerOf[op]` expects,
+   * not a widened `Tuple` cast away. made invokes the handler with the argument tuple, which is
+   * destructured back into positional argument terms (each cast to its exact param type), encoded,
+   * packaged into a [[RawInvocation]], and dispatched by arity.
    */
   private def handlerFor[Raw: Type](
     raw: Expr[RawRpc[Raw]],
-    plan: OpPlan,
+    plan: Type[?],
     ec: Expr[ExecutionContext],
   )(using Quotes,
   ): Expr[?] =
-    // The handler's precise type (`Done.HandlerOf[op]`) is imposed by the enclosing tuple ascription in
-    // `handlersTupleType`, so here we only need the right ARITY shape: made invokes a no-param op's
-    // handler as `() => _` and a parametric op's as `<tuple> => _`. The argument is typed `Tuple`
-    // (erasure-compatible with made's NamedTuple arg) and destructured positionally in `handlerBody`;
-    // the body is left `Any` (the ascription re-types it to the op's `OutputType`).
-    if plan.params.isEmpty then '{ () => ${ handlerBody[Raw, EmptyTuple]('{ EmptyTuple }, plan, raw, ec) } }
-    else '{ (args: Tuple) => ${ handlerBody[Raw, Tuple]('args, plan, raw, ec) } }
+    if PlanReflect.paramsOf(plan).isEmpty then
+      '{ () => ${ handlerBody[Raw, EmptyTuple]('{ EmptyTuple }, plan, raw, ec) } }
+    else
+      // No bound (`<: Product`/`<: Tuple`) on `argsT` here: a `NamedTuple` built from these
+      // quote-pattern-bound (skolem) `n`/`v` type variables fails such bound checks in a quote
+      // pattern, even though the SAME subtyping holds for ordinary, non-macro code — so `argsT` is
+      // left unbounded and `handlerBody` reaches into it via an explicit `asInstanceOf[Product]`.
+      namedArgsType(plan) match
+        case '[argsT] =>
+          '{ (args: argsT) => ${ handlerBody[Raw, argsT]('args, plan, raw, ec) } }
+
+  /**
+   * The op's argument type, exactly as made's [[Done.HandlerOf]] computes it: a `NamedTuple` keyed by
+   * each param's label (a singleton-string tuple, same `ConstantType(StringConstant(...))` idiom
+   * [[Matcher.planOne]] uses), valued by each param's declared type.
+   */
+  private def namedArgsType(plan: Type[?])(using Quotes): Type[?] =
+    import quotes.reflect.*
+    val params = PlanReflect.paramsOf(plan)
+    val namesType = TupleTraverse.foldTuple(params.map(p => ConstantType(StringConstant(p.label)).asType))
+    val typesType = TupleTraverse.foldTuple(params.map(_.paramType))
+    (namesType, typesType) match
+      case ('[type n <: Tuple; n], '[type v <: Tuple; v]) => Type.of[scala.NamedTuple.NamedTuple[n, v]]
+      case _ => report.errorAndAbort(s"could not build named-tuple arg type for ${TypeRepr.of(using plan).show}")
 
   /**
    * The body of one handler: package a [[RawInvocation]] (resolved `rpcName` + nested encoded args) and
    * forward to `raw.fire`/`raw.call`/`raw.get` by the planned arity, decoding the result to the op's
    * exact declared `OutputType`.
    */
-  private def handlerBody[Raw: Type, A <: Tuple: Type](
+  private def handlerBody[Raw: Type, A: Type](
     args: Expr[A],
-    plan: OpPlan,
+    plan: Type[?],
     raw: Expr[RawRpc[Raw]],
     ec: Expr[ExecutionContext],
   )(using Quotes,
@@ -106,32 +143,31 @@ object AsRealDerivation:
     import quotes.reflect.*
 
     // Recover positional argument terms from the args tuple, each cast to its exact declared type, so
-    // the per-param `AsRaw[Raw, t]` encoder applies as the source would.
-    val flatArgTerms: List[Term] = plan.params.zipWithIndex.map { case (param, i) =>
+    // the per-param `AsRaw[Raw, t]` encoder applies as the source would. `A` carries no `Product`
+    // bound (see `handlerFor`), so `args` is cast to `Product` here — safe, since every `A` this is
+    // called with (`EmptyTuple` or a `NamedTuple`) IS one at runtime.
+    val flatArgTerms: List[Term] = PlanReflect.paramsOf(plan).zipWithIndex.map { case (param, i) =>
       param.paramType match
-        case '[t] => '{ $args.productElement(${ Expr(i) }).asInstanceOf[t] }.asTerm
+        case '[t] =>
+          '{ $args.asInstanceOf[Product].productElement(${ Expr(i) }).asInstanceOf[t] }.asTerm
     }
 
     val invocation = invocationExpr[Raw](plan, flatArgTerms)
 
-    plan.arity match
-      case Arity.Fire =>
+    PlanReflect.arityOf(plan) match
+      case '[ArityTag.Fire] =>
         '{ $raw.fire($invocation) }
-      case Arity.Call(resultType) =>
-        resultType match
-          case '[r] =>
-            '{
-              val futureDecoder: AsReal[Future[Raw], Future[r]] =
-                AsReal.forFuture[Raw, r](using scala.compiletime.summonInline[AsReal[Raw, r]], $ec)
-              futureDecoder.asReal($raw.call($invocation))
-            }
-      case Arity.Get(subRpcType) =>
-        subRpcType match
-          case '[sub] =>
-            '{
-              val subProxy = compiletime.summonInline[AsReal[RawRpc[Raw], sub]]
-              AsReal.makeLazy[RawRpc[Raw], sub](subProxy).asReal($raw.get($invocation))
-            }
+      case '[ArityTag.CallOf[r]] =>
+        '{
+          val futureDecoder: AsReal[Future[Raw], Future[r]] =
+            AsReal.forFuture[Raw, r](using scala.compiletime.summonInline[AsReal[Raw, r]], $ec)
+          futureDecoder.asReal($raw.call($invocation))
+        }
+      case '[ArityTag.GetOf[sub]] =>
+        '{
+          val subProxy = compiletime.summonInline[AsReal[RawRpc[Raw], sub]]
+          AsReal.makeLazy[RawRpc[Raw], sub](subProxy).asReal($raw.get($invocation))
+        }
 
   /**
    * Builds `RawInvocation(<rpcName>, <nested encoded args>)`. Each argument is encoded to `Raw` via a
@@ -141,22 +177,22 @@ object AsRealDerivation:
   private def invocationExpr[Raw: Type](
     using q: Quotes,
   )(
-    plan: OpPlan,
+    plan: Type[?],
     flatArgTerms: List[q.reflect.Term],
   ): Expr[RawInvocation[Raw]] =
-    val encodedArgs: List[Expr[Raw]] = plan.params.zip(flatArgTerms).map { case (param, argTerm) =>
+    val encodedArgs: List[Expr[Raw]] = PlanReflect.paramsOf(plan).zip(flatArgTerms).map { case (param, argTerm) =>
       param.paramType match
         case '[t] =>
           '{ scala.compiletime.summonInline[AsRaw[Raw, t]].asRaw(${ argTerm.asExprOf[t] }) }
     }
 
-    val sizes = OpReflect.paramListSizes(plan.opType)
+    val sizes = OpReflect.paramListSizes(PlanReflect.opTypeOf(plan))
     val nested: List[List[Expr[Raw]]] = splitBySizes(encodedArgs, sizes)
     val nestedExprs: List[Expr[List[Raw]]] = nested.map(inner => Expr.ofList(inner))
     val argsExpr: Expr[List[List[Raw]]] =
       if nested.forall(_.isEmpty) then '{ Nil } else Expr.ofList(nestedExprs)
 
-    '{ RawInvocation[Raw](${ Expr(plan.rpcName) }, $argsExpr) }
+    '{ RawInvocation[Raw](${ Expr(PlanReflect.rpcNameOf(plan)) }, $argsExpr) }
 
   /** Splits `items` into consecutive groups of the given `sizes` (the inverse of `flatten`). */
   private def splitBySizes[A](items: List[A], sizes: List[Int]): List[List[A]] =

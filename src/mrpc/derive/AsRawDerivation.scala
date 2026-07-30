@@ -24,55 +24,112 @@ import scala.quoted.*
 object AsRawDerivation:
 
   /**
+   * One [[OpPlan]] type paired with its position in `Done.Operations` (assigned ONCE, right off
+   * [[Matcher.plans]], before any arity filtering) — [[selectOperation]] needs the index to pick the
+   * matching element back off `done.operations`; everything else about the plan is queried on demand
+   * from `opType` via [[PlanReflect]].
+   */
+  private type Plan = (opType: Type[?], index: Int)
+
+  /**
    * The server-adapter conversion as a plain value: `asRaw` wraps a `Real` in the `RawRpc[Raw]` built
-   * by the [[buildRawRpc]] macro. The `AsRaw` wrapper is ordinary Scala (a SAM lambda); only the
-   * `RawRpc` itself — its arity-partitioned `fire`/`call`/`get` dispatch — is generated.
+   * by [[buildRawRpc]]. The `AsRaw` wrapper is ordinary Scala (a SAM lambda); only the `RawRpc` itself
+   * — its arity-partitioned `fire`/`call`/`get` dispatch — is generated.
    */
   inline def impl[Raw, Real](using Done.Of[Real], ExecutionContext): AsRaw[RawRpc[Raw], Real] =
     (api: Real) => buildRawRpc[Raw, Real](api)
 
   /**
-   * Macro entry: build the dispatching `RawRpc[Raw]` for a `Real` instance. The mirror and
-   * `ExecutionContext` are summoned here and handed to [[buildRawRpcImpl]]. `ExecutionContext` is in
-   * scope so the `call` arity can compose `AsRaw[Future[Raw], Future[r]]` via `forFuture`.
+   * Assembles the dispatching `RawRpc[Raw]` for a `Real` instance. `inline`, NOT a macro itself
+   * (no `${...}` splice here) — it just wires each `RawRpc` method to its OWN independent macro
+   * ([[fireDispatch]]/[[callDispatch]]/[[getDispatch]]), so `Raw`/`Real` stay concrete when those
+   * get expanded at this call site. The cost of this split: each of the three re-derives `Done.Of
+   * [Real]`'s [[Matcher.plans]] independently (no macro expansion shares state with another), instead
+   * of the one-macro design computing it once and sharing it across `fire`/`call`/`get` bodies.
+   *
+   * The three dispatch calls are wrapped in plain closures and handed to [[mkRawRpc]] (an ordinary,
+   * non-`inline` method) rather than writing `new RawRpc[Raw]: ...` directly in this `inline` body —
+   * an anonymous class defined inside an `inline def` is otherwise recompiled at every inline site.
    */
   inline def buildRawRpc[Raw, Real](api: Real)(using Done.Of[Real], ExecutionContext): RawRpc[Raw] =
-    ${ buildRawRpcImpl[Raw, Real]('api, 'summon, 'summon) }
+    mkRawRpc[Raw](
+      invocation => fireDispatch[Raw, Real](api, invocation),
+      invocation => callDispatch[Raw, Real](api, invocation),
+      invocation => getDispatch[Raw, Real](api, invocation),
+    )
+
+  private def mkRawRpc[Raw](
+    fireFn: RawInvocation[Raw] => Unit,
+    callFn: RawInvocation[Raw] => Future[Raw],
+    getFn: RawInvocation[Raw] => RawRpc[Raw],
+  ): RawRpc[Raw] =
+    new RawRpc[Raw]:
+      def fire(invocation: RawInvocation[Raw]): Unit = fireFn(invocation)
+      def call(invocation: RawInvocation[Raw]): Future[Raw] = callFn(invocation)
+      def get(invocation: RawInvocation[Raw]): RawRpc[Raw] = getFn(invocation)
+
+  /** Macro entry for the `fire` arity: dispatches `invocation` to `api`'s matching fire-arity op. */
+  inline def fireDispatch[Raw, Real](api: Real, invocation: RawInvocation[Raw])(using Done.Of[Real]): Unit =
+    ${ fireDispatchImpl[Raw, Real]('api, 'invocation, 'summon) }
 
   /**
-   * Builds the `RawRpc[Raw]` whose `fire`/`call`/`get` dispatch incoming invocations by `rpcName`. The
-   * anonymous class lives in this generated quote (not an `inline` body), and `plans` is computed ONCE
-   * here and shared across the three arity-partitioned bodies.
+   * Macro entry for the `call` arity. `ExecutionContext` is in scope so the result can compose
+   * `AsRaw[Future[Raw], Future[r]]` via `forFuture`.
    */
-  private def buildRawRpcImpl[Raw: Type, Real: Type](
+  inline def callDispatch[Raw, Real](
+    api: Real,
+    invocation: RawInvocation[Raw],
+  )(using
+    Done.Of[Real],
+    ExecutionContext,
+  ): Future[Raw] =
+    ${ callDispatchImpl[Raw, Real]('api, 'invocation, 'summon, 'summon) }
+
+  /** Macro entry for the `get` arity (sub-RPC getters). */
+  inline def getDispatch[Raw, Real](api: Real, invocation: RawInvocation[Raw])(using Done.Of[Real]): RawRpc[Raw] =
+    ${ getDispatchImpl[Raw, Real]('api, 'invocation, 'summon) }
+
+  private def fireDispatchImpl[Raw: Type, Real: Type](
     api: Expr[Real],
+    inv: Expr[RawInvocation[Raw]],
+    done: Expr[Done.Of[Real]],
+  )(using Quotes,
+  ): Expr[Unit] =
+    fireBody[Raw, Real](api, inv, planPairs[Real](done), done)
+
+  private def callDispatchImpl[Raw: Type, Real: Type](
+    api: Expr[Real],
+    inv: Expr[RawInvocation[Raw]],
     done: Expr[Done.Of[Real]],
     ec: Expr[ExecutionContext],
   )(using Quotes,
+  ): Expr[Future[Raw]] =
+    callBody[Raw, Real](api, inv, planPairs[Real](done), ec, done)
+
+  private def getDispatchImpl[Raw: Type, Real: Type](
+    api: Expr[Real],
+    inv: Expr[RawInvocation[Raw]],
+    done: Expr[Done.Of[Real]],
+  )(using Quotes,
   ): Expr[RawRpc[Raw]] =
-    val plans = Matcher.planAll[Real](done)
-    '{
-      new RawRpc[Raw]:
-        def fire(invocation: RawInvocation[Raw]): Unit =
-          ${ fireBody[Raw, Real](api, 'invocation, plans, done) }
-        def call(invocation: RawInvocation[Raw]): Future[Raw] =
-          ${ callBody[Raw, Real](api, 'invocation, plans, ec, done) }
-        def get(invocation: RawInvocation[Raw]): RawRpc[Raw] =
-          ${ getBody[Raw, Real](api, 'invocation, plans, done) }
-    }
+    getBody[Raw, Real](api, inv, planPairs[Real](done), done)
+
+  /** Classifies `Real`'s operations into [[Plan]]s, indexed by position in `Done.Operations`. */
+  private def planPairs[Real: Type](done: Expr[Done.Of[Real]])(using Quotes): List[Plan] =
+    Matcher.plans[Real](done).zipWithIndex.map((t, i) => (opType = t, index = i))
 
   // --- arity-partitioned dispatch bodies ---
 
   private def fireBody[Raw: Type, Real: Type](
     api: Expr[Real],
     inv: Expr[RawInvocation[Raw]],
-    plans: List[OpPlan],
+    plans: List[Plan],
     done: Expr[Done.Of[Real]],
   )(using Quotes,
   ): Expr[Unit] =
     val arms = plans.filter(p =>
-      p.arity match
-        case Arity.Fire => true;
+      PlanReflect.arityOf(p.opType) match
+        case '[ArityTag.Fire] => true
         case _ => false,
     )
     matchOnName[Raw, Unit](inv, arms, '{ () }) { plan =>
@@ -84,7 +141,7 @@ object AsRawDerivation:
   private def callBody[Raw: Type, Real: Type](
     api: Expr[Real],
     inv: Expr[RawInvocation[Raw]],
-    plans: List[OpPlan],
+    plans: List[Plan],
     ec: Expr[ExecutionContext],
     done: Expr[Done.Of[Real]],
   )(using Quotes,
@@ -95,31 +152,29 @@ object AsRawDerivation:
       )
     }
     val arms = plans.filter(p =>
-      p.arity match
-        case Arity.Call(_) => true;
+      PlanReflect.arityOf(p.opType) match
+        case '[ArityTag.CallOf[?]] => true
         case _ => false,
     )
     matchOnName[Raw, Future[Raw]](inv, arms, reject) { plan =>
-      plan.arity match
-        case Arity.Call(resultType) =>
-          resultType match
-            case '[r] =>
-              val resultExpr = invokeOp[Raw, Real](api, inv, plan, done).asExprOf[Future[r]]
-              // Compose the leaf result encoder over Future via `forFuture`, threading the
-              // companion-supplied ExecutionContext — never a global one. The encoder is resolved in
-              // the generated code via `summonInline` (which reports a missing `AsRaw[Raw, r]` itself).
-              '{
-                val futureEncoder: AsRaw[Future[Raw], Future[r]] =
-                  AsRaw.forFuture[Raw, r](using scala.compiletime.summonInline[AsRaw[Raw, r]], $ec)
-                futureEncoder.asRaw($resultExpr)
-              }
+      PlanReflect.arityOf(plan.opType) match
+        case '[ArityTag.CallOf[r]] =>
+          val resultExpr = invokeOp[Raw, Real](api, inv, plan, done).asExprOf[Future[r]]
+          // Compose the leaf result encoder over Future via `forFuture`, threading the
+          // companion-supplied ExecutionContext — never a global one. The encoder is resolved in
+          // the generated code via `summonInline` (which reports a missing `AsRaw[Raw, r]` itself).
+          '{
+            val futureEncoder: AsRaw[Future[Raw], Future[r]] =
+              AsRaw.forFuture[Raw, r](using scala.compiletime.summonInline[AsRaw[Raw, r]], $ec)
+            futureEncoder.asRaw($resultExpr)
+          }
         case _ => reject
     }
 
   private def getBody[Raw: Type, Real: Type](
     api: Expr[Real],
     inv: Expr[RawInvocation[Raw]],
-    plans: List[OpPlan],
+    plans: List[Plan],
     done: Expr[Done.Of[Real]],
   )(using Quotes,
   ): Expr[RawRpc[Raw]] =
@@ -129,21 +184,19 @@ object AsRawDerivation:
       )
     }
     val arms = plans.filter(p =>
-      p.arity match
-        case Arity.Get(_) => true;
+      PlanReflect.arityOf(p.opType) match
+        case '[ArityTag.GetOf[?]] => true
         case _ => false,
     )
     matchOnName[Raw, RawRpc[Raw]](inv, arms, reject) { plan =>
-      plan.arity match
-        case Arity.Get(subRpcType) =>
-          subRpcType match
-            case '[sub] =>
-              val subInstance = invokeOp[Raw, Real](api, inv, plan, done).asExprOf[sub]
-              '{
-                AsRaw
-                  .makeLazy[RawRpc[Raw], sub](compiletime.summonInline[AsRaw[RawRpc[Raw], sub]])
-                  .asRaw($subInstance)
-              }
+      PlanReflect.arityOf(plan.opType) match
+        case '[ArityTag.GetOf[sub]] =>
+          val subInstance = invokeOp[Raw, Real](api, inv, plan, done).asExprOf[sub]
+          '{
+            AsRaw
+              .makeLazy[RawRpc[Raw], sub](compiletime.summonInline[AsRaw[RawRpc[Raw], sub]])
+              .asRaw($subInstance)
+          }
         case _ => reject
     }
 
@@ -156,16 +209,16 @@ object AsRawDerivation:
    */
   private def matchOnName[Raw: Type, Res: Type](
     inv: Expr[RawInvocation[Raw]],
-    plans: List[OpPlan],
+    plans: List[Plan],
     reject: Expr[Res],
   )(
-    arm: OpPlan => Expr[Res],
+    arm: Plan => Expr[Res],
   )(using Quotes,
   ): Expr[Res] =
     import quotes.reflect.*
     val scrutinee = '{ ${ inv }.rpcName }.asTerm
     val caseDefs = plans.map { plan =>
-      CaseDef(Literal(StringConstant(plan.rpcName)), None, arm(plan).asTerm)
+      CaseDef(Literal(StringConstant(PlanReflect.rpcNameOf(plan.opType))), None, arm(plan).asTerm)
     }
     val default = CaseDef(Wildcard(), None, reject.asTerm)
     Match(scrutinee, caseDefs :+ default).asExprOf[Res]
@@ -181,7 +234,7 @@ object AsRawDerivation:
   private def invokeOp[Raw: Type, Real: Type](
     api: Expr[Real],
     inv: Expr[RawInvocation[Raw]],
-    plan: OpPlan,
+    plan: Plan,
     done: Expr[Done.Of[Real]],
   )(using q: Quotes,
   ): q.reflect.Term =
@@ -193,7 +246,7 @@ object AsRawDerivation:
 
     // Decode each param to its EXACT declared type via a summoned AsReal[Raw, paramType]; the tuple
     // element is then statically that type, so made's internal unboxing cast is a provable no-op.
-    val decodedArgs: List[Term] = plan.params.zipWithIndex.map { case (param, i) =>
+    val decodedArgs: List[Term] = PlanReflect.paramsOf(plan.opType).zipWithIndex.map { case (param, i) =>
       param.paramType match
         case '[t] =>
           '{ scala.compiletime.summonInline[AsReal[Raw, t]].asReal($flatArgs(${ Expr(i) })) }.asTerm
@@ -202,7 +255,7 @@ object AsRawDerivation:
     // The decoded args are each statically their exact `InputElem.Type`, so the tuple already conforms
     // to the op's `Args` (= `Tuple.Map[InputElems, ExtractOf]`) at the `Done.invoke` call below — no
     // explicit ascription to the path-dependent `op.Args` is needed.
-    val argsTuple = Expr.ofTupleFromSeq(decodedArgs.map(_.asExpr)).asTerm
+    val argsTuple = Expr.ofRefinedTuple(decodedArgs.map(_.asExpr)).asTerm
 
     // Done.invoke(done, op, api, args) — the type-safe extension (`Done.invoke[Real](done)(op, api,
     // args)`). op carries OuterType = Real and Args = the exact tuple we built, both checked against
@@ -223,14 +276,14 @@ object AsRawDerivation:
    */
   private def selectOperation[Real: Type](
     done: Expr[Done.Of[Real]],
-    plan: OpPlan,
+    plan: Plan,
   )(using Quotes,
   ): Expr[Any] =
     // Pull operation `index` off the runtime `operations` tuple and narrow it to its precise refined
     // type so `op.Args`/`op.OutputType` resolve for the type-safe `Done.invoke`. `productElement` is
     // typed `Any` (made's `Operations` is a transparent-given refinement the compiler keeps bound, so
     // neither `.head`/`.tail` reduction nor a checked ascription is available). The narrowing to
-    // `plan.opType` is the SINGLE narrowing in the adapter and is provably sound: the matcher derived
-    // `plan.opType` from THIS SAME mirror, so the runtime element IS exactly that operation type.
-    plan.opType match
+    // `plan.opType`'s `OpType` member is the SINGLE narrowing in the adapter and is provably sound: the
+    // matcher derived it from THIS SAME mirror, so the runtime element IS exactly that operation type.
+    PlanReflect.opTypeOf(plan.opType) match
       case '[op] => '{ $done.operations.productElement(${ Expr(plan.index) }).asInstanceOf[op] }

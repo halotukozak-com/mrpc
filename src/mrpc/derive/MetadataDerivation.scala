@@ -96,7 +96,7 @@ private[mrpc] object MetadataDerivation:
         '{
           scala.compiletime
             .summonInline[scala.deriving.Mirror.ProductOf[t]]
-            .fromProduct(${ Expr.ofTupleFromSeq(argExprs) })
+            .fromProduct(${ Expr.ofRefinedTuple(argExprs) })
         }
 
   /** Classifies a single ctor param by its steering annotation and builds its value Expr. */

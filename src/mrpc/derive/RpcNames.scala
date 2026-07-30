@@ -68,7 +68,7 @@ object RpcNames:
 
     namesTupleType.asType match
       case '[type ns <: Tuple; ns] =>
-        val namesValue: Expr[Tuple] = Expr.ofTupleFromSeq(resolved.map(Expr(_)))
+        val namesValue: Expr[Tuple] = Expr.ofRefinedTuple(resolved.map(Expr(_)))
         '{
           (new RpcNames[T]:
             type Names = ns
