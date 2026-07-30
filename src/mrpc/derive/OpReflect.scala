@@ -8,8 +8,9 @@ import scala.quoted.*
  * One parameter's label, declared type, and raw per-param `Metadata` — a refined `Param` type,
  * mirroring made's own `InputElem` shape, rather than a value: [[OpReflect.inputElems]] never leaves
  * this package other than to feed [[Matcher]]/[[MetadataDerivation]]'s own macro-time classification,
- * so it never needs to exist as a runtime value. Read back via the accessors in [[OpReflect]]
- * (`labelOf`/`paramTypeOf`/`metadataEntries`/`paramHasVerbatim`), same as [[OpPlan]] is read back via
+ * so it never needs to exist as a runtime value. Read back via [[OpReflect.labelOf]]/`metadataEntries`/
+ * `paramHasVerbatim`, or directly via a `case '[Param { type ParamType = t }] => ...` quote pattern at
+ * the (few) call sites that only need one field once, same as [[OpPlan]] is read back via
  * [[PlanReflect]].
  */
 private[mrpc] sealed trait Param:
@@ -35,27 +36,9 @@ private[mrpc] object OpReflect:
 
   /** The op's (or param's) `Label` singleton-string member as a plain `String`. */
   def labelOf(opType: Type[?])(using Quotes): String =
-    labelTypeOf(opType) match
-      case '[type l <: String; l] =>
+    opType.runtimeChecked match
+      case '[type l <: String; { type Label = l }] =>
         Type.valueOfConstant[l].getOrElse(quotes.reflect.report.errorAndAbort("Label is not a string literal")).toString
-
-  /**
-   * The op's (or param's) `Label` member AS A TYPE — the singleton string type itself, not lowered
-   * to a `String` value. For callers that only ever relay the label into another refined type (e.g.
-   * `Matcher.planParam` building a `ParamPlan`), this skips the pointless type -> value -> type
-   * round-trip `labelOf` followed by re-lifting a `String` would otherwise take.
-   */
-  def labelTypeOf(t: Type[?])(using Quotes): Type[?] =
-    t match
-      case '[DoneOperation { type Label = l }] => Type.of[l]
-      case '[Param { type Label = l }] => Type.of[l]
-      case _ => quotes.reflect.report.errorAndAbort(s"no Label member on ${Type.show(using t)}")
-
-  /** The param's `ParamType` member — its declared parameter type. */
-  def paramTypeOf(paramType: Type[?])(using Quotes): Type[?] =
-    paramType match
-      case '[Param { type ParamType = t }] => Type.of[t]
-      case _ => quotes.reflect.report.errorAndAbort(s"no ParamType member on ${Type.show(using paramType)}")
 
   /** `true` when the param carries a `@verbatim` annotation. */
   def paramHasVerbatim(paramType: Type[?])(using Quotes): Boolean =
@@ -95,8 +78,7 @@ private[mrpc] object OpReflect:
   /** The op's (or param's) `Metadata` tuple entries as types (each an `AnnotatedType(Meta, annot)`). */
   def metadataEntries(t: Type[?])(using Quotes): List[Type[?]] =
     t match
-      case '[type meta <: Tuple; DoneOperation { type Metadata = meta }] => TupleTraverse.traverseTuple(Type.of[meta])
-      case '[type meta <: Tuple; Param { type Metadata = meta }] => TupleTraverse.traverseTuple(Type.of[meta])
+      case '[type meta <: Tuple; { type Metadata = meta }] => TupleTraverse.traverseTuple(Type.of[meta])
       case _ => Nil
 
   /** Reads a singleton-string-valued field `field` off an annotation of type `A` on the op, if present. */

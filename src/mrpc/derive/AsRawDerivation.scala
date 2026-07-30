@@ -27,7 +27,7 @@ object AsRawDerivation:
    * One [[OpPlan]] type paired with its position in `Done.Operations` (assigned ONCE, right off
    * [[Matcher.plans]], before any arity filtering) — [[selectOperation]] needs the index to pick the
    * matching element back off `done.operations`; everything else about the plan is queried on demand
-   * from `opType` via [[PlanReflect]].
+   * from `opType` via local quote-pattern reads (`arityOf`/`paramTypesOf`/...).
    */
   private type Plan = (opType: Type[?], index: Int)
 
@@ -128,7 +128,7 @@ object AsRawDerivation:
   )(using Quotes,
   ): Expr[Unit] =
     val arms = plans.filter(p =>
-      PlanReflect.arityOf(p.opType) match
+      arityOf(p.opType) match
         case '[ArityTag.Fire] => true
         case _ => false,
     )
@@ -152,12 +152,12 @@ object AsRawDerivation:
       )
     }
     val arms = plans.filter(p =>
-      PlanReflect.arityOf(p.opType) match
+      arityOf(p.opType) match
         case '[ArityTag.CallOf[?]] => true
         case _ => false,
     )
     matchOnName[Raw, Future[Raw]](inv, arms, reject) { plan =>
-      PlanReflect.arityOf(plan.opType) match
+      arityOf(plan.opType) match
         case '[ArityTag.CallOf[r]] =>
           val resultExpr = invokeOp[Raw, Real](api, inv, plan, done).asExprOf[Future[r]]
           // Compose the leaf result encoder over Future via `forFuture`, threading the
@@ -184,12 +184,12 @@ object AsRawDerivation:
       )
     }
     val arms = plans.filter(p =>
-      PlanReflect.arityOf(p.opType) match
+      arityOf(p.opType) match
         case '[ArityTag.GetOf[?]] => true
         case _ => false,
     )
     matchOnName[Raw, RawRpc[Raw]](inv, arms, reject) { plan =>
-      PlanReflect.arityOf(plan.opType) match
+      arityOf(plan.opType) match
         case '[ArityTag.GetOf[sub]] =>
           val subInstance = invokeOp[Raw, Real](api, inv, plan, done).asExprOf[sub]
           '{
@@ -218,10 +218,29 @@ object AsRawDerivation:
     import quotes.reflect.*
     val scrutinee = '{ ${ inv }.rpcName }.asTerm
     val caseDefs = plans.map { plan =>
-      CaseDef(Literal(StringConstant(PlanReflect.rpcNameOf(plan.opType))), None, arm(plan).asTerm)
+      val rpcName = plan.opType.runtimeChecked match
+        case '[OpPlan { type RpcName = n }] =>
+          Type.of[n] match
+            case '[type nn <: String; nn] =>
+              Type.valueOfConstant[nn].getOrElse(report.errorAndAbort("RpcName is not a string literal")).toString
+      CaseDef(Literal(StringConstant(rpcName)), None, arm(plan).asTerm)
     }
     val default = CaseDef(Wildcard(), None, reject.asTerm)
     Match(scrutinee, caseDefs :+ default).asExprOf[Res]
+
+  /** The plan's `ArityInfo` member — quote-pattern-match the result directly at the call site. */
+  private def arityOf(plan: Type[?])(using Quotes): Type[?] =
+    plan.runtimeChecked match
+      case '[OpPlan { type ArityInfo = a }] => Type.of[a]
+
+  /** Each parameter's declared `ParamType`, in the op's declaration order, off `plan`'s `Params`. */
+  private def paramTypesOf(plan: Type[?])(using Quotes): List[Type[?]] =
+    (plan.runtimeChecked match { case '[OpPlan { type Params = ps }] => Type.of[ps] }) match
+      case '[type pst <: Tuple; pst] =>
+        TupleTraverse.traverseTuple(Type.of[pst]).map { pt =>
+          pt.runtimeChecked match
+            case '[ParamPlan { type ParamType = t }] => Type.of[t]
+        }
 
   /**
    * Decodes the invocation's flat arguments to the operation's exact `InputElem.Type`s, assembles
@@ -246,8 +265,8 @@ object AsRawDerivation:
 
     // Decode each param to its EXACT declared type via a summoned AsReal[Raw, paramType]; the tuple
     // element is then statically that type, so made's internal unboxing cast is a provable no-op.
-    val decodedArgs: List[Term] = PlanReflect.paramsOf(plan.opType).zipWithIndex.map { case (param, i) =>
-      param.paramType match
+    val decodedArgs: List[Term] = paramTypesOf(plan.opType).zipWithIndex.map { case (paramType, i) =>
+      paramType match
         case '[t] =>
           '{ scala.compiletime.summonInline[AsReal[Raw, t]].asReal($flatArgs(${ Expr(i) })) }.asTerm
     }
@@ -285,5 +304,7 @@ object AsRawDerivation:
     // neither `.head`/`.tail` reduction nor a checked ascription is available). The narrowing to
     // `plan.opType`'s `OpType` member is the SINGLE narrowing in the adapter and is provably sound: the
     // matcher derived it from THIS SAME mirror, so the runtime element IS exactly that operation type.
-    PlanReflect.opTypeOf(plan.opType) match
+    val opType = plan.opType.runtimeChecked match
+      case '[OpPlan { type OpType = o }] => Type.of[o]
+    opType match
       case '[op] => '{ $done.operations.productElement(${ Expr(plan.index) }).asInstanceOf[op] }

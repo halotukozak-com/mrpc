@@ -37,20 +37,46 @@ private[mrpc] object Matcher:
 
   /** Renders one [[OpPlan]] type into the runtime [[OpDescriptor]] the tests compare against. */
   private def descriptorExpr(plan: Type[?])(using Quotes): Expr[OpDescriptor] =
-    val (arityTag, carried) = PlanReflect.arityOf(plan) match
+    val label = plan.runtimeChecked match
+      case '[type l <: String; { type Label = l }] =>
+        Type.valueOfConstant[l].getOrElse(quotes.reflect.report.errorAndAbort("Label is not a string literal")).toString
+
+    val rpcName = plan.runtimeChecked match
+      case '[OpPlan { type RpcName = n }] =>
+        Type.of[n] match
+          case '[type nn <: String; nn] =>
+            Type.valueOfConstant[nn].getOrElse(quotes.reflect.report.errorAndAbort("RpcName is not a string literal")).toString
+
+    val arityInfo: Type[?] = plan.runtimeChecked match
+      case '[OpPlan { type ArityInfo = a }] => Type.of[a]
+    val (arityTag, carried) = arityInfo match
       case '[ArityTag.Fire] => ("fire", "")
       case '[ArityTag.CallOf[r]] => ("call", typeShow(Type.of[r]))
       case '[ArityTag.GetOf[s]] => ("get", typeShow(Type.of[s]))
       case _ => quotes.reflect.report.errorAndAbort("unrecognized ArityTag")
-    val paramEncodings = PlanReflect.paramsOf(plan).map(p => encodingTag(p.encoding))
+
+    val paramsType: Type[?] = plan.runtimeChecked match
+      case '[OpPlan { type Params = ps }] => Type.of[ps]
+    val paramEncodings = paramsType match
+      case '[type pst <: Tuple; pst] =>
+        TupleTraverse.traverseTuple(Type.of[pst]).map { pt =>
+          val encoding: Type[?] = pt.runtimeChecked match
+            case '[ParamPlan { type Encoding = e }] => Type.of[e]
+          encodingTag(encoding)
+        }
+
+    val resultEncoding = encodingTag(plan.runtimeChecked match {
+      case '[OpPlan { type ResultEncoding = e }] => Type.of[e]
+    })
+
     '{
       OpDescriptor(
-        label = ${ Expr(PlanReflect.labelOf(plan)) },
-        rpcName = ${ Expr(PlanReflect.rpcNameOf(plan)) },
+        label = ${ Expr(label) },
+        rpcName = ${ Expr(rpcName) },
         arity = ${ Expr(arityTag) },
         carriedType = ${ Expr(carried) },
         paramEncodings = ${ Expr(paramEncodings) },
-        resultEncoding = ${ Expr(encodingTag(PlanReflect.resultEncodingOf(plan))) },
+        resultEncoding = ${ Expr(resultEncoding) },
       )
     }
 
@@ -93,8 +119,8 @@ private[mrpc] object Matcher:
   /**
    * The consumer-facing entry point: [[planAll]]'s `Plans` tuple, traversed back into the
    * `List[Type[?]]` of individual [[OpPlan]]s the server adapter and client proxy macros actually
-   * iterate over — each queried on demand via [[PlanReflect]], same as [[operationTypes]]'s list of
-   * `DoneOperation` types is queried via [[OpReflect]].
+   * iterate over — each queried on demand via local quote-pattern reads on the plan's `Type[?]`, same
+   * as [[operationTypes]]'s list of `DoneOperation` types is queried via [[OpReflect]].
    */
   def plans[T: Type](done: Expr[Done.Of[T]])(using Quotes): List[Type[?]] =
     planAll[T](done) match
@@ -140,13 +166,16 @@ private[mrpc] object Matcher:
     val paramTypes: List[Type[?]] = OpReflect.inputElems(opType).map(planParam)
     val paramsType: Type[? <: Tuple] = TupleTraverse.foldTuple(paramTypes)
 
+    // `labelType` relays the op's EXISTING `Label` type directly; `rpcName` has no pre-existing type
+    // to relay — it's a value computed by `RpcName.computeAll` — so it genuinely needs lifting via
+    // `ConstantType(StringConstant(...))`.
+    val labelType = opType.runtimeChecked match
+      case '[type l <: String; { type Label = l }] => Type.of[l]
+
     // Under the fixed-RawRpc model the result is always encoded via the summoned leaf bridge unless
     // it is itself Raw; @verbatim on a non-Raw result has no identity to land on. Result-verbatim is
     // therefore only reachable through the same Raw-type check params use; v1 fixtures encode results.
-    // `label` relays the op's EXISTING `Label` type directly (`labelTypeOf`); `rpcName` has no
-    // pre-existing type to relay — it's a value computed by `RpcName.computeAll` — so it genuinely
-    // needs lifting via `ConstantType(StringConstant(...))`.
-    (OpReflect.labelTypeOf(opType), ConstantType(StringConstant(rpcName)).asType, arityType, paramsType, opType) match
+    (labelType, ConstantType(StringConstant(rpcName)).asType, arityType, paramsType, opType) match
       case (
             '[type l <: String; l],
             '[type n <: String; n],
@@ -186,11 +215,14 @@ private[mrpc] object Matcher:
    * fixed-String fixtures no param is `Raw`, so this resolves to `Encoded`, matching the divergence.
    */
   private def planParam(param: Type[?])(using Quotes): Type[?] =
-    val paramType = OpReflect.paramTypeOf(param)
+    val paramType = param.runtimeChecked match
+      case '[Param { type ParamType = t }] => Type.of[t]
     val encodingType: Type[? <: EncodingTag] =
       if OpReflect.paramHasVerbatim(param) && OpReflect.isRawCarrier(paramType) then Type.of[EncodingTag.Verbatim]
       else Type.of[EncodingTag.Encoded]
-    (OpReflect.labelTypeOf(param), paramType, encodingType) match
+    val labelType = param.runtimeChecked match
+      case '[type l <: String; { type Label = l }] => Type.of[l]
+    (labelType, paramType, encodingType) match
       case ('[type l <: String; l], '[t], '[type e <: EncodingTag; e]) =>
         Type.of[ParamPlan { type Label = l; type ParamType = t; type Encoding = e }]
       case _ => quotes.reflect.report.errorAndAbort(s"could not build ParamPlan for param")

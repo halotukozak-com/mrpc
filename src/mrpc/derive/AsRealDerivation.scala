@@ -103,7 +103,7 @@ object AsRealDerivation:
     ec: Expr[ExecutionContext],
   )(using Quotes,
   ): Expr[?] =
-    if PlanReflect.paramsOf(plan).isEmpty then
+    if paramsOf(plan).isEmpty then
       '{ () => ${ handlerBody[Raw, EmptyTuple]('{ EmptyTuple }, plan, raw, ec) } }
     else
       // No bound (`<: Product`/`<: Tuple`) on `argsT` here: a `NamedTuple` built from these
@@ -121,12 +121,26 @@ object AsRealDerivation:
    */
   private def namedArgsType(plan: Type[?])(using Quotes): Type[?] =
     import quotes.reflect.*
-    val params = PlanReflect.paramsOf(plan)
+    val params = paramsOf(plan)
     val namesType = TupleTraverse.foldTuple(params.map(p => ConstantType(StringConstant(p.label)).asType))
     val typesType = TupleTraverse.foldTuple(params.map(_.paramType))
     (namesType, typesType) match
       case ('[type n <: Tuple; n], '[type v <: Tuple; v]) => Type.of[scala.NamedTuple.NamedTuple[n, v]]
       case _ => report.errorAndAbort(s"could not build named-tuple arg type for ${TypeRepr.of(using plan).show}")
+
+  /** One parameter's label + declared type, read off `plan`'s `Params` tuple, in order. */
+  private def paramsOf(plan: Type[?])(using Quotes): List[(label: String, paramType: Type[?])] =
+    (plan.runtimeChecked match { case '[OpPlan { type Params = ps }] => Type.of[ps] }) match
+      case '[type pst <: Tuple; pst] =>
+        TupleTraverse.traverseTuple(Type.of[pst]).map { pt =>
+          pt.runtimeChecked match
+            case '[type l <: String; ParamPlan { type Label = l; type ParamType = t }] =>
+              val label = Type
+                .valueOfConstant[l]
+                .getOrElse(quotes.reflect.report.errorAndAbort("Label is not a string literal"))
+                .toString
+              (label = label, paramType = Type.of[t])
+        }
 
   /**
    * The body of one handler: package a [[RawInvocation]] (resolved `rpcName` + nested encoded args) and
@@ -146,7 +160,7 @@ object AsRealDerivation:
     // the per-param `AsRaw[Raw, t]` encoder applies as the source would. `A` carries no `Product`
     // bound (see `handlerFor`), so `args` is cast to `Product` here — safe, since every `A` this is
     // called with (`EmptyTuple` or a `NamedTuple`) IS one at runtime.
-    val flatArgTerms: List[Term] = PlanReflect.paramsOf(plan).zipWithIndex.map { case (param, i) =>
+    val flatArgTerms: List[Term] = paramsOf(plan).zipWithIndex.map { case (param, i) =>
       param.paramType match
         case '[t] =>
           '{ $args.asInstanceOf[Product].productElement(${ Expr(i) }).asInstanceOf[t] }.asTerm
@@ -154,7 +168,9 @@ object AsRealDerivation:
 
     val invocation = invocationExpr[Raw](plan, flatArgTerms)
 
-    PlanReflect.arityOf(plan) match
+    val arityInfo: Type[?] = plan.runtimeChecked match
+      case '[OpPlan { type ArityInfo = a }] => Type.of[a]
+    arityInfo match
       case '[ArityTag.Fire] =>
         '{ $raw.fire($invocation) }
       case '[ArityTag.CallOf[r]] =>
@@ -180,19 +196,30 @@ object AsRealDerivation:
     plan: Type[?],
     flatArgTerms: List[q.reflect.Term],
   ): Expr[RawInvocation[Raw]] =
-    val encodedArgs: List[Expr[Raw]] = PlanReflect.paramsOf(plan).zip(flatArgTerms).map { case (param, argTerm) =>
+    val encodedArgs: List[Expr[Raw]] = paramsOf(plan).zip(flatArgTerms).map { case (param, argTerm) =>
       param.paramType match
         case '[t] =>
           '{ scala.compiletime.summonInline[AsRaw[Raw, t]].asRaw(${ argTerm.asExprOf[t] }) }
     }
 
-    val sizes = OpReflect.paramListSizes(PlanReflect.opTypeOf(plan))
+    val opType = plan.runtimeChecked match
+      case '[OpPlan { type OpType = o }] => Type.of[o]
+    val sizes = OpReflect.paramListSizes(opType)
     val nested: List[List[Expr[Raw]]] = splitBySizes(encodedArgs, sizes)
     val nestedExprs: List[Expr[List[Raw]]] = nested.map(inner => Expr.ofList(inner))
     val argsExpr: Expr[List[List[Raw]]] =
       if nested.forall(_.isEmpty) then '{ Nil } else Expr.ofList(nestedExprs)
 
-    '{ RawInvocation[Raw](${ Expr(PlanReflect.rpcNameOf(plan)) }, $argsExpr) }
+    val rpcName = plan.runtimeChecked match
+      case '[OpPlan { type RpcName = n }] =>
+        Type.of[n] match
+          case '[type nn <: String; nn] =>
+            Type
+              .valueOfConstant[nn]
+              .getOrElse(q.reflect.report.errorAndAbort("RpcName is not a string literal"))
+              .toString
+
+    '{ RawInvocation[Raw](${ Expr(rpcName) }, $argsExpr) }
 
   /** Splits `items` into consecutive groups of the given `sizes` (the inverse of `flatten`). */
   private def splitBySizes[A](items: List[A], sizes: List[Int]): List[List[A]] =

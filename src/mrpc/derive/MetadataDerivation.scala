@@ -307,7 +307,10 @@ private[mrpc] object MetadataDerivation:
       "@rpcParamMetadata",
       items,
       key = p => OpReflect.labelOf(p),
-      elem = (elemTpe, p) => buildValue(specialize(elemTpe, OpReflect.paramTypeOf(p)), Context.Param(p)),
+      elem = (elemTpe, p) =>
+        val paramType = p.runtimeChecked match
+          case '[Param { type ParamType = t }] => Type.of[t]
+        buildValue(specialize(elemTpe, paramType), Context.Param(p)),
     )
 
   /**
