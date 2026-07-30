@@ -1,53 +1,12 @@
 package mrpc.derive
 
-import made.Done
-
 import scala.quoted.*
 
 /**
- * Per-operation resolved RPC name as a typeclass: `RpcName[Op].name` (and the singleton `type Name`)
- * is the SAME string [[RpcName.computeAll]] resolves for that op. Derived independently per op, so a
- * whole trait's names are `compiletime.summonAll[Tuple.Map[Done.Operations, RpcName]]`.
- *
- * Overload disambiguation stays correct despite being per-op: each `DoneOperation` carries
- * `OuterType` (the enclosing trait), so the derivation re-derives `Done.Of[OuterType]` to see the
- * sibling operations and decide whether this op's base name is overloaded. (Cost: O(n) sibling walk
- * per op; `computeAll` does it once for all — prefer `computeAll` inside the engine macros, this
- * typeclass is for type-level/summonAll consumers.)
+ * Resolves the final rpcName for every operation of a trait — the annotation reading + overload
+ * disambiguation [[RpcNames]] delegates to for its single, whole-trait, annotation-proof pass.
  */
-sealed trait RpcName[Op]:
-  type Name <: String
-  def name: Name
-
 object RpcName:
-  transparent inline given derived[Op]: RpcName[Op] = ${ deriveImpl[Op] }
-
-  private def deriveImpl[Op: Type](using Quotes): Expr[RpcName[Op]] =
-    import quotes.reflect.*
-    val opTpe = TypeRepr.of[Op]
-    val outerTpe = opTpe.select(opTpe.typeSymbol.typeMember("OuterType")).dealias
-    val nm: String = outerTpe.asType match
-      case '[real] =>
-        val done = Expr.summon[Done.Of[real]].get
-        val siblings = Matcher.operationTypes[real](done)
-        resolveOne(Type.of[Op], siblings)
-      case _ => report.errorAndAbort(s"cannot read OuterType of ${opTpe.show}")
-    ConstantType(StringConstant(nm)).asType match
-      case '[type n <: String; n] =>
-        '{
-          (new RpcName[Op]:
-            type Name = n
-            def name: Name = ${ Expr(nm) }.asInstanceOf[n]
-          ): RpcName[Op] { type Name = n }
-        }
-
-  /** The resolved name for `op` given its sibling operations — the per-op slice of [[computeAll]]. */
-  private def resolveOne(op: Type[?], siblings: List[Type[?]])(using Quotes): String =
-    val base = baseName(op)
-    val overloaded = siblings.map(baseName).count(_ == base) > 1
-    val prefixed = applyPrefix(op, base, overloaded)
-    if overloaded && !OpReflect.hasAnnotation[mrpc.annotation.rpcName](op) then prefixed + overloadSuffix(op)
-    else prefixed
 
   /**
    * Resolves the final rpcName for every op (positionally), aborting on a duplicate. Resolution order
