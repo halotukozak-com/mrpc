@@ -15,10 +15,3 @@ final class rpcMethodMetadata extends MetaAnnotation
  * deferred.
  */
 final class rpcParamMetadata extends MetaAnnotation
-
-/**
- * Marks a metadata slot that collects per-RPC-type-parameter metadata. Mirrors commons
- * `rpcTypeParamMetadata`. Declared now for the Plan 02+ macro vocabulary; the per-type-param
- * projection is a stretch goal per research.
- */
-final class rpcTypeParamMetadata extends MetaAnnotation

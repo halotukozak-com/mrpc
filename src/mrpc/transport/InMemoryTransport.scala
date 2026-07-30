@@ -36,7 +36,3 @@ final class InMemoryTransport(server: RawRpc[String]) extends RawRpc[String]:
   // Re-wrap the sub-RPC so each nesting level re-crosses the transport boundary (recursion-aware).
   def get(invocation: RawInvocation[String]): RawRpc[String] =
     new InMemoryTransport(server.get(hop(invocation)))
-
-object InMemoryTransport:
-  /** Ergonomic construction mirroring the `new InMemoryTransport(server)` form. */
-  def apply(server: RawRpc[String]): InMemoryTransport = new InMemoryTransport(server)
