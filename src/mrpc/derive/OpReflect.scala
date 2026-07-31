@@ -1,6 +1,6 @@
 package mrpc.derive
 
-import made.{DoneOperation, InputElem}
+import made.DoneOperation
 
 import scala.quoted.*
 
@@ -36,7 +36,7 @@ private[mrpc] object OpReflect:
 
   /** `true` when the param carries a `@verbatim` annotation. */
   def paramHasVerbatim[m <: Tuple: Type](using Quotes): Boolean =
-    TupleTraverse.traverseTuple[m, Boolean].exists(isAnnotation[mrpc.annotation.verbatim])
+    TupleTraverse.traverseTuple[m, made.Meta].exists(isAnnotation[mrpc.annotation.verbatim])
 
   /**
    * The op's per-parameter-list arities, read off its `ParamLists` (a tuple of singleton `Int`s).

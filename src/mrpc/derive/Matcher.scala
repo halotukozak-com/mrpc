@@ -23,6 +23,12 @@ import scala.quoted.*
  */
 private[mrpc] object Matcher:
 
+  /** The op's (or param's) `Label` singleton-string member as a plain `String`. */
+  private def labelOf(opType: Type[?])(using Quotes): String =
+    opType.runtimeChecked match
+      case '[type l <: String; { type Label = l }] =>
+        Type.valueOfConstant[l].getOrElse(quotes.reflect.report.errorAndAbort("Label is not a string literal")).toString
+
   /**
    * Classifies every operation of `T` into an [[OpPlan]] and folds the results into a `Plans <:
    * Tuple` type — one [[OpPlan]] per `Done.Operations` entry, in the same order — mirroring how
@@ -70,13 +76,12 @@ private[mrpc] object Matcher:
       case '{ type operations <: Tuple; $_ : { type Operations = operations } } =>
         TupleTraverse.traverseTuple[operations, DoneOperation]
     val resolvedNames = RpcNames.namesOf[T](names)
-    val idx = ops.indexWhere { case '[type label <: String; { type Label = label }] =>
-      Type.of[label] == Type.of[L]
-    }
-    if idx < 0 then report.errorAndAbort(s"no operation labeled '${Type.show[L]}' in ${TypeRepr.of[T].show}")
+    val label = Type.valueOfConstant[L].getOrElse(report.errorAndAbort("L must be a literal string")).toString
+    val idx = ops.indexWhere(op => labelOf(op) == label)
+    if idx < 0 then report.errorAndAbort(s"no operation labeled '$label' in ${TypeRepr.of[T].show}")
     planOne((ops(idx), resolvedNames(idx))) match
       case '[type p <: OpPlan; p] => '{ null.asInstanceOf[p] }
-      case _ => report.errorAndAbort(s"could not build OpPlan for label '${Type.show[L]}'")
+      case _ => report.errorAndAbort(s"could not build OpPlan for label '$label'")
 
   /**
    * Like [[planFor]], but returns EVERY operation sharing label `L` as a tuple (declaration order) —
@@ -97,7 +102,7 @@ private[mrpc] object Matcher:
         TupleTraverse.traverseTuple[operations, DoneOperation]
     val resolvedNames = RpcNames.namesOf[T](names)
     val label = Type.valueOfConstant[L].getOrElse(report.errorAndAbort("L must be a literal string")).toString
-    val matches = ops.zip(resolvedNames).collect { case r @ ('[{ type Label = L }], _) => r }
+    val matches = ops.zip(resolvedNames).filter((op, _) => labelOf(op) == label)
     if matches.isEmpty then report.errorAndAbort(s"no operation labeled '$label' in ${TypeRepr.of[T].show}")
     val nulls: List[Expr[Any]] = matches.map(planOne).map { case '[type p <: OpPlan; p] =>
       '{ null.asInstanceOf[p] }
