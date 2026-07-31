@@ -1,6 +1,7 @@
 package mrpc.derive
 
-import made.{Done, DoneOperation, InputElem}
+import made.{Done, DoneOperation, InputElem, Meta}
+import mrpc.annotation.verbatim
 
 import scala.concurrent.Future
 import scala.quoted.*
@@ -110,8 +111,14 @@ private[mrpc] object Matcher:
         TupleTraverse
           .traverseTuple[elems, InputElem]
           .map { case '[type m <: Tuple; InputElem { type Label = l; type Type = t; type Metadata = m }] =>
+            def isVerbatim[T: Type] = TypeRepr.of[T] match
+              case AnnotatedType(_, annot) => annot.tpe <:< TypeRepr.of[verbatim]
+              case _ => false
+            def isRawCarrier[T: Type]: Boolean = TypeRepr.of[T].typeSymbol.isAbstractType
+
             val encodingType =
-              if OpReflect.paramHasVerbatim[m] && OpReflect.isRawCarrier[t] then Type.of[EncodingTag.Verbatim]
+              if TupleTraverse.traverseTuple[m, Meta].exists(isVerbatim(using _)) && OpReflect.isRawCarrier[t]
+              then Type.of[EncodingTag.Verbatim]
               else Type.of[EncodingTag.Encoded]
             encodingType match
               case '[type e <: EncodingTag; e] =>

@@ -33,11 +33,6 @@ private[mrpc] sealed trait Param:
  * metadata materialization — one Done-walk path, no fork.
  */
 private[mrpc] object OpReflect:
-
-  /** `true` when the param carries a `@verbatim` annotation. */
-  def paramHasVerbatim[m <: Tuple: Type](using Quotes): Boolean =
-    TupleTraverse.traverseTuple[m, made.Meta].exists(isAnnotation[mrpc.annotation.verbatim])
-
   /**
    * The op's per-parameter-list arities, read off its `ParamLists` (a tuple of singleton `Int`s).
    * The client proxy uses these to split a flat encoded-argument list back into the nested
@@ -82,9 +77,3 @@ private[mrpc] object OpReflect:
       .map(t => TypeRepr.of(using t))
       .collectFirst:
         case AnnotatedType(_, annot) if annot.tpe <:< TypeRepr.of[A] => annot.asExprOf[A].valueOrAbort
-
-  private def isAnnotation[A: Type](entry: Type[?])(using Quotes): Boolean =
-    import quotes.reflect.*
-    TypeRepr.of(using entry) match
-      case AnnotatedType(_, annot) => annot.tpe <:< TypeRepr.of[A]
-      case _ => false
