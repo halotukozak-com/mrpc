@@ -43,8 +43,8 @@ private[derive] sealed trait ParamPlan:
 
 /**
  * One operation's classification, at the type level: arity, resolved rpcName, per-parameter encode
- * plan, and the underlying `DoneOperation` this plan describes. [[Matcher.plans]] builds a `List` of
- * these — one per `Done.Operations` entry, in the same order, so a plan's position in that list IS
+ * plan, and the underlying `DoneOperation` this plan describes. [[Plans]] collects a `Tuple` of these
+ * — one per `Done.Operations` entry, in the same order, so a plan's position in that tuple IS
  * its `Done.Operations` index. Mirrors how made's `Done` models `T` as a `Tuple` of `DoneOperation`s.
  * Read back via local quote-pattern reads on the plan's `Type[?]` (`Matcher`, `AsRawDerivation`, `AsRealDerivation` each
  * keep their own), or directly by test code via `Matcher.planFor`/`Matcher.plansFor` + `summon[... =:=

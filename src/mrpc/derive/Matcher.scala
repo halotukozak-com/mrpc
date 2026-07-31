@@ -4,12 +4,13 @@ import scala.quoted.*
 
 /**
  * Reads [[Plans]] — the single classification authority ([[OpPlan.classify]], collected once per `T`)
- * — back into the shapes callers need: the full ordered list ([[plans]]), or a lookup by label
- * ([[planFor]] / [[plansFor]]), for tests and for the server-adapter dispatch build ([[AsRawDerivation]]).
+ * — back into a lookup by label ([[planFor]] / [[plansFor]]), for tests to assert compile-time facts
+ * about one operation's classification. [[AsRawDerivation]] reads the full ordered list directly off
+ * [[Plans.allOf]] instead, since it has no single label to look up.
  *
  * Deliberately does NOT classify anything itself: every op's [[OpPlan]] already exists as a member of
  * `Plans[T].All`, so this object only ever filters/looks up that one tuple — no separate
- * re-derivation path to keep in sync with [[OpPlan.impl]].
+ * re-derivation path to keep in sync with [[OpPlan.classify]].
  */
 private[mrpc] object Matcher:
 
@@ -18,15 +19,6 @@ private[mrpc] object Matcher:
     opType.runtimeChecked match
       case '[type l <: String; { type Label = l }] =>
         Type.valueOfConstant[l].getOrElse(quotes.reflect.report.errorAndAbort("Label is not a string literal")).toString
-
-  /**
-   * Every operation of `T`, classified — one per `Done.Operations` entry, in the same order — the
-   * consumer-facing list the server adapter iterates over, each queried on demand via local
-   * quote-pattern reads on the plan's `Type[?]`. Sourced from [[Plans]] (summoned once at the call
-   * site via the `Plans as plans` context bound), not re-derived here.
-   */
-  def plans[T: Type](plans: Expr[Plans[T]])(using Quotes): List[Type[? <: OpPlan]] =
-    Plans.allOf[T](plans)
 
   /**
    * Exposes a SINGLE operation's [[OpPlan]] type directly to the CALLER's type checker —

@@ -32,23 +32,19 @@ object AsRawDerivation:
     (api: Real) => buildRawRpc[Raw, Real](api)
 
   /**
-   * Assembles the dispatching `RawRpc[Raw]` for a `Real` instance. `inline`, NOT a macro itself
-   * (no `${...}` splice here) — it just wires each `RawRpc` method to its OWN independent macro
-   * ([[fireDispatch]]/[[callDispatch]]/[[getDispatch]]), so `Raw`/`Real` stay concrete when those
-   * get expanded at this call site. The cost of this split: each of the three re-derives `Done.Of
-   * [Real]`'s [[Matcher.plans]] independently (no macro expansion shares state with another), instead
-   * of the one-macro design computing it once and sharing it across `fire`/`call`/`get` bodies.
-   *
-   * The three dispatch calls are wrapped in plain closures and handed to [[mkRawRpc]] (an ordinary,
-   * non-`inline` method) rather than writing `new RawRpc[Raw]: ...` directly in this `inline` body —
-   * an anonymous class defined inside an `inline def` is otherwise recompiled at every inline site.
+   * Macro entry: assembles the dispatching `RawRpc[Raw]` for a `Real` instance. `Done.Of[Real]` and
+   * `Plans[Real]` are summoned ONCE here (via their own context bounds) and shared across the
+   * `fire`/`call`/`get` bodies below — unlike three independent macro entries, which would each
+   * re-derive them.
    */
-  inline def buildRawRpc[Raw, Real: Done.Of](api: Real)(using ExecutionContext): RawRpc[Raw] = mkRawRpc[Raw](
-    invocation => fireDispatch[Raw, Real](api, invocation),
-    invocation => callDispatch[Raw, Real](api, invocation),
-    invocation => getDispatch[Raw, Real](api, invocation),
-  )
+  inline def buildRawRpc[Raw, Real: {Done.Of as done, Plans as plans}](api: Real)(using ec: ExecutionContext)
+    : RawRpc[Raw] =
+    ${ buildRawRpcImpl[Raw, Real]('api, 'done, 'plans, 'ec) }
 
+  /**
+   * `mkRawRpc` is an ordinary, non-`inline` method — an anonymous class defined directly inside an
+   * `inline`/macro body is otherwise recompiled at every inline site.
+   */
   private def mkRawRpc[Raw](
     fireFn: RawInvocation[Raw] => Unit,
     callFn: RawInvocation[Raw] => Future[Raw],
@@ -59,57 +55,21 @@ object AsRawDerivation:
       def call(invocation: RawInvocation[Raw]): Future[Raw] = callFn(invocation)
       def get(invocation: RawInvocation[Raw]): RawRpc[Raw] = getFn(invocation)
 
-  /** Macro entry for the `fire` arity: dispatches `invocation` to `api`'s matching fire-arity op. */
-  inline def fireDispatch[Raw, Real: {Done.Of as done, Plans as plans}](api: Real, invocation: RawInvocation[Raw])
-    : Unit =
-    ${ fireDispatchImpl[Raw, Real]('api, 'invocation, 'done, 'plans) }
-
-  /**
-   * Macro entry for the `call` arity. `ExecutionContext` is in scope so the result can compose
-   * `AsRaw[Future[Raw], Future[r]]` via `forFuture`.
-   */
-  inline def callDispatch[Raw, Real: {Done.Of as done, Plans as plans}](
-    api: Real,
-    invocation: RawInvocation[Raw],
-  )(using ec: ExecutionContext,
-  ): Future[Raw] =
-    ${ callDispatchImpl[Raw, Real]('api, 'invocation, 'done, 'plans, 'ec) }
-
-  /** Macro entry for the `get` arity (sub-RPC getters). */
-  inline def getDispatch[Raw, Real: {Done.Of as done, Plans as plans}](
-    api: Real,
-    invocation: RawInvocation[Raw],
-  )(using Done.Of[Real],
-  ): RawRpc[Raw] =
-    ${ getDispatchImpl[Raw, Real]('api, 'invocation, 'done, 'plans) }
-
-  private def fireDispatchImpl[Raw: Type, Real: Type](
+  private def buildRawRpcImpl[Raw: Type, Real: Type](
     api: Expr[Real],
-    inv: Expr[RawInvocation[Raw]],
-    done: Expr[Done.Of[Real]],
-    plans: Expr[Plans[Real]],
-  )(using Quotes,
-  ): Expr[Unit] =
-    fireBody[Raw, Real](api, inv, Matcher.plans[Real](plans), done)
-
-  private def callDispatchImpl[Raw: Type, Real: Type](
-    api: Expr[Real],
-    inv: Expr[RawInvocation[Raw]],
     done: Expr[Done.Of[Real]],
     plans: Expr[Plans[Real]],
     ec: Expr[ExecutionContext],
   )(using Quotes,
-  ): Expr[Future[Raw]] =
-    callBody[Raw, Real](api, inv, Matcher.plans[Real](plans), ec, done)
-
-  private def getDispatchImpl[Raw: Type, Real: Type](
-    api: Expr[Real],
-    inv: Expr[RawInvocation[Raw]],
-    done: Expr[Done.Of[Real]],
-    plans: Expr[Plans[Real]],
-  )(using Quotes,
   ): Expr[RawRpc[Raw]] =
-    getBody[Raw, Real](api, inv, Matcher.plans[Real](plans), done)
+    val allPlans = Plans.allOf[Real](plans)
+    '{
+      mkRawRpc[Raw](
+        (invocation: RawInvocation[Raw]) => ${ fireBody[Raw, Real](api, 'invocation, allPlans, done) },
+        (invocation: RawInvocation[Raw]) => ${ callBody[Raw, Real](api, 'invocation, allPlans, ec, done) },
+        (invocation: RawInvocation[Raw]) => ${ getBody[Raw, Real](api, 'invocation, allPlans, done) },
+      )
+    }
 
   // --- arity-partitioned dispatch bodies ---
 
