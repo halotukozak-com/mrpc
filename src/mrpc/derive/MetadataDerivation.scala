@@ -52,7 +52,7 @@ private[mrpc] object MetadataDerivation:
     )
 
     /** A single RPC method/op (its refined `DoneOperation` type + resolved rpcName). */
-    case Method[Op, Name <: String](opType: Type[Op], resolvedName: Type[Name])
+    case Method[Op <: DoneOperation, Name <: String](opType: Type[Op], resolvedName: Type[Name])
 
     /** A single RPC parameter (a refined [[OpReflect.Param]] type). */
     case Param[P <: mrpc.derive.Param](param: Type[P])
@@ -259,7 +259,7 @@ private[mrpc] object MetadataDerivation:
       elem = [elem: Type] =>
         p =>
           p.runtimeChecked match
-            case ('[real], resolvedName) =>
+            case ('[type real <: DoneOperation; real], resolvedName) =>
               Type.of[elem] match
                 case '[type f[_] <: elem; f] => buildValue[f[real]](Context.Method(Type.of[real], resolvedName))
                 case _ => buildValue[elem](Context.Method(Type.of[real], resolvedName)),

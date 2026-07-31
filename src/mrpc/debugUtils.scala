@@ -1,4 +1,5 @@
-package mrpc.derive
+package mrpc
+
 import scala.quoted.*
 import scala.util.Try
 
@@ -14,7 +15,7 @@ import scala.util.Try
  * @param symbol the symbol to inspect
  * @return a multi-line string with detailed symbol information
  */
-private[derive] def symbolInfo(
+private[mrpc] def symbolInfo(
   using quotes: Quotes,
 )(
   symbol: quotes.reflect.Symbol,
@@ -84,7 +85,7 @@ private[derive] def symbolInfo(
  * @param tpe the type to inspect
  * @return a multi-line string with detailed type information
  */
-private[derive] def typeReprInfo(
+private[mrpc] def typeReprInfo(
   using quotes: Quotes,
 )(
   tpe: quotes.reflect.TypeRepr,
@@ -112,7 +113,7 @@ private[derive] def typeReprInfo(
      |typeArgs: ${tpe.typeArgs}
      |""".stripMargin
 
-private[derive] def compareTypeReprs(
+private[mrpc] def compareTypeReprs(
   using quotes: Quotes,
 )(
   a: quotes.reflect.TypeRepr,
@@ -121,7 +122,7 @@ private[derive] def compareTypeReprs(
 ): Nothing =
   compareTypes(using a.asType, b.asType)
 
-private[derive] def compareTypes[T <: AnyKind: Type, U <: AnyKind: Type](using Quotes, Position): Nothing =
+private[mrpc] def compareTypes[T <: AnyKind: Type, U <: AnyKind: Type](using Quotes, Position): Nothing =
   import quotes.reflect.*
   s"""
      |expected:
@@ -140,13 +141,13 @@ private[derive] def compareTypes[T <: AnyKind: Type, U <: AnyKind: Type](using Q
  * @param tree the tree to inspect
  * @return a multi-line string with tree structure and code
  */
-private[derive] def treeInfo(using quotes: Quotes)(tree: quotes.reflect.Tree): String =
+private[mrpc] def treeInfo(using quotes: Quotes)(tree: quotes.reflect.Tree): String =
   import quotes.reflect.*
   s"""
      |Structure ${Printer.TreeStructure.show(tree)}
      |ShortCode ${Printer.TreeShortCode.show(tree)}
      |""".stripMargin
-private[derive] def positionInfo(using quotes: Quotes)(pos: quotes.reflect.Position): String =
+private[mrpc] def positionInfo(using quotes: Quotes)(pos: quotes.reflect.Position): String =
   s"""
      |start: ${pos.start},
      |end: ${pos.end},
@@ -157,14 +158,14 @@ private[derive] def positionInfo(using quotes: Quotes)(pos: quotes.reflect.Posit
      |sourceFile: ${pos.sourceFile},
      |""".stripMargin
 
-inline private[derive] def showAst(inline body: Any) = ${ showAstImpl('{ body }) }
+inline private[mrpc] def showAst(inline body: Any) = ${ showAstImpl('{ body }) }
 
 private def showAstImpl(body: Expr[Any])(using quotes: Quotes): Expr[Nothing] =
   given Position = Position.NoPosition
   import quotes.reflect.*
   Printer.TreeShortCode.show(body.asTerm.underlyingArgument).dbg
 
-inline private[derive] def showRawAst(inline body: Any) = ${ showRawAstImpl('{ body }) }
+inline private[mrpc] def showRawAst(inline body: Any) = ${ showRawAstImpl('{ body }) }
 
 private def showRawAstImpl(body: Expr[Any])(using quotes: Quotes): Expr[Nothing] =
   given Position = Position.NoPosition
@@ -172,15 +173,15 @@ private def showRawAstImpl(body: Expr[Any])(using quotes: Quotes): Expr[Nothing]
   Printer.TreeStructure.show(body.asTerm.underlyingArgument).dbg
 
 extension (s: String)
-  private[derive] def dbg(using position: Position)(using quotes: Quotes): Nothing =
+  private[mrpc] def dbg(using position: Position)(using quotes: Quotes): Nothing =
     import quotes.reflect.*
     report.errorAndAbort(s"$s $position")
-  private[derive] def info(using position: Position)(using quotes: Quotes): String =
+  private[mrpc] def info(using position: Position)(using quotes: Quotes): String =
     import quotes.reflect.*
     report.info(s"$s $position")
     s
 
-inline private[derive] def raiseUnsupportedTypeFor[For <: AnyKind, Provided] = ${
+inline private[mrpc] def raiseUnsupportedTypeFor[For <: AnyKind, Provided] = ${
   raiseUnsupportedTypeForImpl[For, Provided]
 }
 private def raiseUnsupportedTypeForImpl[For <: AnyKind: Type, Provided: Type](using quotes: Quotes): Expr[Nothing] =
@@ -189,7 +190,7 @@ private def raiseUnsupportedTypeForImpl[For <: AnyKind: Type, Provided: Type](us
   report.error(s"Unsupported type for ${TypeRepr.of[For].show}: ${TypeRepr.of[Provided].show}")
   '{ ??? }
 
-inline private[derive] def raiseCannotDerivedTypeFor[For <: AnyKind, Provided] = ${
+inline private[mrpc] def raiseCannotDerivedTypeFor[For <: AnyKind, Provided] = ${
   raiseCannotDerivedTypeForImpl[For, Provided]
 }
 private def raiseCannotDerivedTypeForImpl[For <: AnyKind: Type, Provided: Type](using quotes: Quotes): Expr[Nothing] =
@@ -198,25 +199,25 @@ private def raiseCannotDerivedTypeForImpl[For <: AnyKind: Type, Provided: Type](
   report.error(s"Cannot derive for ${TypeRepr.of[For].show} for ${TypeRepr.of[Provided].show}")
   '{ ??? }
 
-inline private[derive] def showTypeRepr[T] = ${ showTypeReprImpl[T] }
+inline private[mrpc] def showTypeRepr[T] = ${ showTypeReprImpl[T] }
 
 private def showTypeReprImpl[T: Type](using Quotes): Expr[Nothing] =
   given Position = Position.NoPosition
   import quotes.reflect.*
   typeReprInfo(TypeRepr.of[T]).dbg
 
-private[derive] def wontHappen(using Quotes, Position) =
+private[mrpc] def wontHappen(using Quotes, Position) =
   s"This code should never be executed".dbg
 // $COVERAGE-ON$
 
-private[derive] case class Position(
+private[mrpc] case class Position(
   startLine: Int,
   startColumn: Int,
   sourceFile: String,
 ):
   override def toString: String = s"at line $startLine, column $startColumn in $sourceFile"
 
-private[derive] object Position:
+private[mrpc] object Position:
   object NoPosition extends Position(-1, -1, "<no source file>"):
     override def toString: String = "<no position>"
   inline given Position = ${ impl }

@@ -53,20 +53,12 @@ private[mrpc] object OpReflect:
       case _ => quotes.reflect.report.errorAndAbort(s"no ParamLists member on ${Type.show(using opType)}")
 
   /** The op's (or param's) `Metadata` tuple entries as types (each an `AnnotatedType(Meta, annot)`). */
-  def metadataEntries(t: Type[?])(using Quotes): List[Type[?]] = t match
+  def metadataEntries(t: Type[? <: { type Metadata <: Tuple }])(using Quotes): List[Type[?]] = t match
     case '[type meta <: Tuple; { type Metadata = meta }] => TupleTraverse.traverseTuple[meta, made.Meta]
     case _ => Nil
 
-  /** Reads a singleton-string-valued field `field` off an annotation of type `A` on the op, if present. */
-  def stringAnnotationArg[A: Type](opType: Type[?], field: String)(using Quotes): Option[String] =
-    findAnnotation[A](opType).flatMap(annot => extractStringArg(annot, field))
-
-  /** Reads a `Boolean` field `field` off an annotation of type `A` on the op (default `false`). */
-  def booleanAnnotationArg[A: Type](opType: Type[?], field: String)(using Quotes): Option[Boolean] =
-    findAnnotation[A](opType).map(annot => extractBooleanArg(annot, field))
-
   /** `true` when the op carries an annotation of type `A`. */
-  def hasAnnotation[A: Type](opType: Type[?])(using Quotes): Boolean =
+  def hasAnnotation[A: {Type, FromExpr}](opType: Type[? <: DoneOperation])(using Quotes): Boolean =
     findAnnotation[A](opType).isDefined
 
   /**
@@ -84,12 +76,12 @@ private[mrpc] object OpReflect:
   // --- internals ---
 
   /** Locates an annotation term of type `A` in the op's `Metadata`, like made's `getAnnotationImpl`. */
-  private def findAnnotation[A: Type](using q: Quotes)(opType: Type[?]): Option[q.reflect.Term] =
+  def findAnnotation[A: {Type, FromExpr}](using q: Quotes)(opType: Type[? <: DoneOperation]): Option[A] =
     import q.reflect.*
     metadataEntries(opType).iterator
       .map(t => TypeRepr.of(using t))
       .collectFirst:
-        case AnnotatedType(_, annot) if annot.tpe <:< TypeRepr.of[A] => annot
+        case AnnotatedType(_, annot) if annot.tpe <:< TypeRepr.of[A] => annot.asExprOf[A].valueOrAbort
 
   private def isAnnotation[A: Type](entry: Type[?])(using Quotes): Boolean =
     import quotes.reflect.*

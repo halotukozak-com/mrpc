@@ -1,7 +1,6 @@
 package mrpc.derive
 
-import made.{Done, DoneOperation, InputElem}
-
+import made.*
 import scala.quoted.*
 
 /**
@@ -28,7 +27,7 @@ object RpcNames:
       done.Operations,
       [Op] =>> Op match
         case ([l0 <: String] =>> DoneOperation { type Label = l0 })[l] => l,
-    ]]('done)
+    ], done.Operations]
   }
 
   /**
@@ -42,13 +41,14 @@ object RpcNames:
     rpcNames.runtimeChecked match
       case '{ type ns <: Tuple; $_ : RpcNames[T] { type Names = ns } } => TupleTraverse.traverseTuple[ns, String]
 
-  private def deriveImpl[T: Type, Labels <: Tuple:Type](done: Expr[Done.Of[T]])(using Quotes): Expr[RpcNames[T]] =
-    import quotes.reflect.*
-    val ops = done match
-      case '{ type operations <: Tuple; $_ : { type Operations = operations } } =>
-        TupleTraverse.traverseTuple[operations, DoneOperation]
-
-    val bases = ops.map(baseName)
+  private def deriveImpl[T: Type, Labels <: Tuple: Type, Operations <: Tuple: Type](using Quotes): Expr[RpcNames[T]] =
+    val ops = TupleTraverse.traverseTuple[Operations, DoneOperation]
+    val bases = ops.map: op =>
+      OpReflect
+        .findAnnotation[mrpc.annotation.rpcName](op)
+        .map(_.name)
+        .getOrElse(op match
+          case '[type l <: String; { type Label = l }] => Type.valueOfConstant[l].get)
 
     // Group by base name to detect overloads: a base shared by >1 op is an overloaded set.
     val baseCounts: Map[String, Int] = bases.groupBy(identity).view.mapValues(_.size).toMap
@@ -66,36 +66,21 @@ object RpcNames:
 
     detectDuplicates(labels, resolved)
 
-    // Fold the resolved names into a singleton-string tuple type `n1 *: n2 *: ... *: EmptyTuple`.
-    val namesTupleType: TypeRepr = resolved.foldRight(TypeRepr.of[EmptyTuple]): (n, acc) =>
-      (ConstantType(StringConstant(n)).asType, acc.asType) match
-        case ('[type s <: String; s], '[type r <: Tuple; r]) => TypeRepr.of[s *: r]
-        case _ => acc
-
-    namesTupleType.asType.runtimeChecked match
-      case '[type ns <: Tuple; ns] =>
-        val namesValue: Expr[Tuple] = Expr.ofRefinedTuple(resolved.map(Expr(_)))
+    Expr.ofRefinedTuple(resolved.map(Expr(_))) match
+      case '{ type ns <: Tuple; $namesValue: ns } =>
         '{
           (new RpcNames[T]:
             type Names = ns
-            def names: Names = $namesValue.asInstanceOf[ns]
+            def names: Names = $namesValue
           ): RpcNames[T] { type Names = ns }
         }
 
-  private def baseName(op: Type[?])(using Quotes): String =
-    OpReflect
-      .stringAnnotationArg[mrpc.annotation.rpcName](op, "name")
-      .getOrElse(op match
-        case '[type l <: String; { type Label = l }] => Type.valueOfConstant[l].get)
-
   /** Applies `@rpcNamePrefix` per its `overloadedOnly` flag. */
-  private def applyPrefix(op: Type[?], base: String, overloaded: Boolean)(using Quotes): String =
-    OpReflect.stringAnnotationArg[mrpc.annotation.rpcNamePrefix](op, "prefix") match
+  private def applyPrefix(op: Type[? <: DoneOperation], base: String, overloaded: Boolean)(using Quotes): String =
+    OpReflect.findAnnotation[mrpc.annotation.rpcNamePrefix](op) match
       case None => base
-      case Some(prefix) =>
-        val overloadedOnly =
-          OpReflect.booleanAnnotationArg[mrpc.annotation.rpcNamePrefix](op, "overloadedOnly").getOrElse(false)
-        if !overloadedOnly || overloaded then prefix + base else base
+      case Some(annot) =>
+        if !annot.overloadedOnly || overloaded then annot.prefix + base else base
 
   /**
    * Deterministic, reorder-stable suffix for an overloaded method: `_` followed by a positive
