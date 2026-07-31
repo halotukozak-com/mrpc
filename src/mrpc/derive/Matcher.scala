@@ -29,7 +29,7 @@ private[mrpc] object Matcher:
     opType.runtimeChecked match
       case '[type l <: String; { type Label = l }] =>
         Type.valueOfConstant[l].getOrElse(quotes.reflect.report.errorAndAbort("Label is not a string literal")).toString
-
+  
   /**
    * Classifies every operation of `T` into an [[OpPlan]] — one per `Done.Operations` entry, in the
    * same order — the consumer-facing list the server adapter and client proxy macros iterate over,
@@ -38,14 +38,14 @@ private[mrpc] object Matcher:
    * mirror is passed in (summoned once at the call site via the `Done.Of as done` context bound), not
    * re-summoned here.
    */
-  def plans[T: Type](done: Expr[Done.Of[T]], names: Expr[RpcNames[T]])(using Quotes): List[Type[? <: OpPlan]] =
+  def plans[T: Type](done: Expr[Done.Of[T]], names: Expr[RpcNames[T]])(using Quotes): Type[? <: Tuple] =
     val ops = done match
       case '{ type operations <: Tuple; $_ : { type Operations = operations } } =>
         TupleTraverse.traverseTuple[operations, DoneOperation]
     // Names come from the single authority `RpcNames[T]` (type-level `Names`, read back by `namesOf`);
     // `RpcNames.derived`'s own `errorAndAbort` on a duplicate name surfaces at its summon site.
     val resolvedNames = RpcNames.namesOf[T](names)
-    ops.zip(resolvedNames).map(planOne)
+    TupleTraverse.foldTuple(ops.zip(resolvedNames).map(planOne))
 
   /**
    * Exposes a SINGLE operation's [[OpPlan]] type directly to the CALLER's type checker —
@@ -69,7 +69,7 @@ private[mrpc] object Matcher:
     val label = Type.valueOfConstant[L].getOrElse(report.errorAndAbort("L must be a literal string")).toString
     val idx = ops.indexWhere(op => labelOf(op) == label)
     if idx < 0 then report.errorAndAbort(s"no operation labeled '$label' in ${TypeRepr.of[T].show}")
-    planOne(ops(idx), resolvedNames(idx)) match
+    OpPlan.impl(using ops(idx), resolvedNames(idx)) match
       case '[type p <: OpPlan; p] => '{ null.asInstanceOf[p] }
       case _ => report.errorAndAbort(s"could not build OpPlan for label '$label'")
 
@@ -94,56 +94,8 @@ private[mrpc] object Matcher:
     val label = Type.valueOfConstant[L].getOrElse(report.errorAndAbort("L must be a literal string")).toString
     val matches = ops.zip(resolvedNames).filter((op, _) => labelOf(op) == label)
     if matches.isEmpty then report.errorAndAbort(s"no operation labeled '$label' in ${TypeRepr.of[T].show}")
-    val nulls: List[Expr[Any]] = matches.map(planOne).map { case '[type p <: OpPlan; p] =>
-      '{ null.asInstanceOf[p] }
-    }
+    val nulls: List[Expr[Any]] = matches.map(OpPlan.impl(using _, _))
     Expr.ofRefinedTuple(nulls)
 
   /** Classifies a single operation type into a refined [[OpPlan]] type using its resolved rpcName. */
-  private def planOne(opType: Type[?], rpcName: Type[? <: String])(using Quotes): Type[? <: OpPlan] =
-    import quotes.reflect.*
-    val arityType = opType match
-      case '[{ type OutputType = Unit }] => Type.of[ArityTag.Fire]
-      case '[{ type OutputType = Future[x] }] => Type.of[ArityTag.CallOf[x]]
-      case '[{ type OutputType = other }] => Type.of[ArityTag.GetOf[other]]
-    val paramsType: Type[? <: Tuple] = TupleTraverse.foldTuple(opType match
-      case '[type elems <: Tuple; DoneOperation { type InputElems = elems }] =>
-        TupleTraverse
-          .traverseTuple[elems, InputElem]
-          .map { case '[type m <: Tuple; InputElem { type Label = l; type Type = t; type Metadata = m }] =>
-            def isVerbatim[T: Type] = TypeRepr.of[T] match
-              case AnnotatedType(_, annot) => annot.tpe <:< TypeRepr.of[verbatim]
-              case _ => false
-            def isRawCarrier[T: Type]: Boolean = TypeRepr.of[T].typeSymbol.isAbstractType
-
-            val encodingType =
-              if TupleTraverse.traverseTuple[m, Meta].exists(isVerbatim(using _)) && OpReflect.isRawCarrier[t]
-              then Type.of[EncodingTag.Verbatim]
-              else Type.of[EncodingTag.Encoded]
-            encodingType match
-              case '[type e <: EncodingTag; e] =>
-                Type.of[ParamPlan { type Label = l; type ParamType = t; type Encoding = e }]
-          })
-
-    // Under the fixed-RawRpc model the result is always encoded via the summoned leaf bridge unless
-    // it is itself Raw; @verbatim on a non-Raw result has no identity to land on. Result-verbatim is
-    // therefore only reachable through the same Raw-type check params use; v1 fixtures encode results.
-    (opType, rpcName, arityType, paramsType, opType) match
-      case (
-            '[type l <: String; { type Label = l }],
-            '[type n <: String; n],
-            '[type a <: ArityTag; a],
-            '[type ps <: Tuple; ps],
-            '[o],
-          ) =>
-        Type.of[
-          OpPlan {
-            type Label = l
-            type RpcName = n
-            type ArityInfo = a
-            type Params = ps
-            type ResultEncoding = EncodingTag.Encoded
-            type OpType = o
-          },
-        ]
-      case _ => report.errorAndAbort(s"could not build OpPlan for operation ${TypeRepr.of(using opType).show}")
+ 
