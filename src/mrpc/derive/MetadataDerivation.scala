@@ -107,14 +107,15 @@ private[mrpc] object MetadataDerivation:
     import quotes.reflect.*
 
     def has[A: Type]: Boolean = param.annotations.exists(_.tpe <:< TypeRepr.of[A])
-    def annotOf[A: Type]: Option[Term] = param.annotations.find(_.tpe <:< TypeRepr.of[A])
+    def annotOf[A: {Type, FromExpr}]: Option[A] =
+      param.annotations.find(_.tpe <:< TypeRepr.of[A]).flatMap(_.asExprOf[A].value)
 
     // The arity marker steering collection / single / optional slot shapes. Default is @single.
     val arity = arityOf(param)
 
     if has[mrpc.annotation.composite] then composite[Param](ctx)
     else if has[mrpc.annotation.reifyName] then
-      val useRaw = annotOf[mrpc.annotation.reifyName].exists(reifyNameUseRaw)
+      val useRaw = annotOf[mrpc.annotation.reifyName].exists(_.useRawName)
       Expr(Type.valueOfConstant(using reifyName(ctx, useRaw)).get)
     else if has[mrpc.annotation.reifyAnnot] then reifyAnnot[Param](ctx, arity)
     else if has[mrpc.annotation.infer] then infer[Param](param)
@@ -147,10 +148,6 @@ private[mrpc] object MetadataDerivation:
    */
   private def composite[M: Type](ctx: Context)(using Quotes): Expr[Any] =
     buildValue[M](ctx)
-
-  /** Reads `@reifyName`'s `useRawName` boolean off the annotation term (default false). */
-  private def reifyNameUseRaw(using Quotes)(annot: quotes.reflect.Term): Boolean =
-    OpReflect.extractBooleanArg(annot, "useRawName")
 
   /** `@reifyName`: source label or, when `useRaw`, the resolved rpcName for the current context. */
   private def reifyName(using Quotes)(ctx: Context, useRaw: Boolean): Type[? <: String] =
@@ -220,15 +217,13 @@ private[mrpc] object MetadataDerivation:
       .getOrElse:
         val clue = param.annotations
           .find(_.tpe <:< TypeRepr.of[mrpc.annotation.infer])
-          .flatMap(inferClue)
+          .map(_.asExprOf[mrpc.annotation.infer])
+          .flatMap(_.value)
+          .map(_.clue)
           .filter(_.nonEmpty)
           .map(c => s" ($c)")
           .getOrElse("")
         report.errorAndAbort(s"@infer: no given instance for ${Type.show[Param]}$clue")
-
-  /** Reads `@infer`'s `clue` string off the annotation term. */
-  private def inferClue(using Quotes)(annot: quotes.reflect.Term): Option[String] =
-    OpReflect.extractStringArg(annot, "clue")
 
   /**
    * `@rpcMethodMetadata`: projects over the trait's ops. Arity-shaped:

@@ -9,7 +9,7 @@ import scala.quoted.{Expr, FromExpr, Quotes}
 final class rpcNamePrefix(val prefix: String, val overloadedOnly: Boolean) extends MetaAnnotation:
   def this(prefix: String) = this(prefix, false)
 
-object rpcNamePrefix:
+private[mrpc] object rpcNamePrefix:
   given FromExpr[rpcNamePrefix]:
     def unapply(expr: Expr[rpcNamePrefix])(using quotes: Quotes): Option[rpcNamePrefix] = expr match
       case '{ new `rpcNamePrefix`(${ Expr(prefix) }, ${ Expr(overloaded) }) } =>
