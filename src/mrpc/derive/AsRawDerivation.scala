@@ -60,56 +60,56 @@ object AsRawDerivation:
       def get(invocation: RawInvocation[Raw]): RawRpc[Raw] = getFn(invocation)
 
   /** Macro entry for the `fire` arity: dispatches `invocation` to `api`'s matching fire-arity op. */
-  inline def fireDispatch[Raw, Real: {Done.Of as done, RpcNames as names}](api: Real, invocation: RawInvocation[Raw])
+  inline def fireDispatch[Raw, Real: {Done.Of as done, Plans as plans}](api: Real, invocation: RawInvocation[Raw])
     : Unit =
-    ${ fireDispatchImpl[Raw, Real]('api, 'invocation, 'done, 'names) }
+    ${ fireDispatchImpl[Raw, Real]('api, 'invocation, 'done, 'plans) }
 
   /**
    * Macro entry for the `call` arity. `ExecutionContext` is in scope so the result can compose
    * `AsRaw[Future[Raw], Future[r]]` via `forFuture`.
    */
-  inline def callDispatch[Raw, Real: {Done.Of as done, RpcNames as names}](
+  inline def callDispatch[Raw, Real: {Done.Of as done, Plans as plans}](
     api: Real,
     invocation: RawInvocation[Raw],
   )(using ec: ExecutionContext,
   ): Future[Raw] =
-    ${ callDispatchImpl[Raw, Real]('api, 'invocation, 'done, 'names, 'ec) }
+    ${ callDispatchImpl[Raw, Real]('api, 'invocation, 'done, 'plans, 'ec) }
 
   /** Macro entry for the `get` arity (sub-RPC getters). */
-  inline def getDispatch[Raw, Real: {Done.Of as done, RpcNames as names}](
+  inline def getDispatch[Raw, Real: {Done.Of as done, Plans as plans}](
     api: Real,
     invocation: RawInvocation[Raw],
   )(using Done.Of[Real],
   ): RawRpc[Raw] =
-    ${ getDispatchImpl[Raw, Real]('api, 'invocation, 'done, 'names) }
+    ${ getDispatchImpl[Raw, Real]('api, 'invocation, 'done, 'plans) }
 
   private def fireDispatchImpl[Raw: Type, Real: Type](
     api: Expr[Real],
     inv: Expr[RawInvocation[Raw]],
     done: Expr[Done.Of[Real]],
-    names: Expr[RpcNames[Real]],
+    plans: Expr[Plans[Real]],
   )(using Quotes,
   ): Expr[Unit] =
-    fireBody[Raw, Real](api, inv, Matcher.plans[Real](done, names), done)
+    fireBody[Raw, Real](api, inv, Matcher.plans[Real](plans), done)
 
   private def callDispatchImpl[Raw: Type, Real: Type](
     api: Expr[Real],
     inv: Expr[RawInvocation[Raw]],
     done: Expr[Done.Of[Real]],
-    names: Expr[RpcNames[Real]],
+    plans: Expr[Plans[Real]],
     ec: Expr[ExecutionContext],
   )(using Quotes,
   ): Expr[Future[Raw]] =
-    callBody[Raw, Real](api, inv, Matcher.plans[Real](done, names), ec, done)
+    callBody[Raw, Real](api, inv, Matcher.plans[Real](plans), ec, done)
 
   private def getDispatchImpl[Raw: Type, Real: Type](
     api: Expr[Real],
     inv: Expr[RawInvocation[Raw]],
     done: Expr[Done.Of[Real]],
-    names: Expr[RpcNames[Real]],
+    plans: Expr[Plans[Real]],
   )(using Quotes,
   ): Expr[RawRpc[Raw]] =
-    getBody[Raw, Real](api, inv, Matcher.plans[Real](done, names), done)
+    getBody[Raw, Real](api, inv, Matcher.plans[Real](plans), done)
 
   // --- arity-partitioned dispatch bodies ---
 

@@ -11,66 +11,64 @@ import scala.quoted.*
 sealed trait Handler[Raw, Op <: OpPlan]
 
 sealed trait EmptyHandler[Raw, Op <: OpPlan] extends Handler[Raw, Op], (() => Any)
-sealed trait NonEmptyHandler[Raw, Op <: OpPlan] extends Handler[Raw, Op], ((Op#Args & Tuple) => Any)
+sealed trait NonEmptyHandler[Raw, Op <: OpPlan] extends Handler[Raw, Op], ((OpPlan.ArgsOf[Op] & Tuple) => Any)
 
 object Handler:
 
-  inline given [Raw: RawRpc, Plan <: OpPlan] => ExecutionContext => Handler[Raw, Plan] =
+  /** Factored out of the `given` below (an ordinary, non-`inline` method) so the anonymous
+   * `EmptyHandler`/`NonEmptyHandler` class bodies are compiled once, generically — not duplicated at
+   * every inline site the `given` expands to.
+   */
+  private def emptyHandler[Raw, Plan <: OpPlan](body: () => Any): Handler[Raw, Plan] =
+    new EmptyHandler[Raw, Plan]:
+      override def apply(): Any = body()
+
+  private def nonEmptyHandler[Raw, Plan <: OpPlan](body: (OpPlan.ArgsOf[Plan] & Tuple) => Any): Handler[Raw, Plan] =
+    new NonEmptyHandler[Raw, Plan]:
+      override def apply(args: OpPlan.ArgsOf[Plan] & Tuple): Any = body(args)
+
+  /**
+   * Named (not anonymous) so callers that already hold a concrete `Plan` — [[AsRealDerivation]]'s
+   * generated code, one `p` per classified [[OpPlan]] — can reference it DIRECTLY (`Handler.derived[Raw,
+   * p]`) instead of going through `summon`/`summonInline[ExecutionContext => Handler[Raw, p]]`. Ordinary
+   * implicit search silently REJECTS this `given` as a candidate for a structurally-refined `Plan`
+   * (never even reaching this body — confirmed by direct comparison, not merely a swallowed-exception
+   * guess), while an explicit direct reference resolves it correctly; only the `Raw: RawRpc` context
+   * bound still needs — and gets — ordinary implicit resolution at the (direct) call site.
+   */
+  inline given derived: [Raw: RawRpc, Plan <: OpPlan] => ExecutionContext => Handler[Raw, Plan] =
     inline compiletime.erasedValue[Plan] match
       case plan =>
         inline compiletime.erasedValue[plan.OpType] match
           case op: DoneOperation =>
             inline compiletime.erasedValue[plan.Args] match
               case _: EmptyTuple =>
-                new EmptyHandler[Raw, Plan]:
-                  override def apply(): Any =
-                    handlerBody[Raw, Plan, plan.Args, plan.RpcName, op.ParamLists](EmptyTuple.asInstanceOf[plan.Args])
+                emptyHandler[Raw, Plan] { () =>
+                  handlerBody[Raw, Plan, plan.Args, plan.RpcName, op.ParamLists](EmptyTuple.asInstanceOf[plan.Args])
+                }
               case _ =>
-                new NonEmptyHandler[Raw, Plan]:
-                  override def apply(args: Plan#Args & Tuple): Any =
-                    handlerBody[Raw, Plan, plan.Args, plan.RpcName, op.ParamLists](args.asInstanceOf[plan.Args])
+                nonEmptyHandler[Raw, Plan] { args =>
+                  handlerBody[Raw, Plan, plan.Args, plan.RpcName, op.ParamLists](args.asInstanceOf[plan.Args])
+                }
 
   inline def handlerBody[Raw: RawRpc as raw, Plan <: OpPlan, Args <: Tuple, Name <: String, Lists <: Tuple](
     tup: Args,
   )(using ec: ExecutionContext,
   ) =
-    ${
-      handlerBodyImpl[Raw, Plan, Args, Name](
-        'tup,
-        'raw,
-        'ec,
-        '{ compiletime.constValueTuple[Lists].toList.asInstanceOf[List[Int]] },
-      )
-    }
+    ${ handlerBodyImpl[Raw, Plan, Args, Name, Lists]('tup, 'raw, 'ec) }
 
-  private def handlerBodyImpl[Raw: Type, Plan <: OpPlan: Type, Args <: Tuple: Type, Name <: String: Type](
+  private def handlerBodyImpl[
+    Raw: Type,
+    Plan <: OpPlan: Type,
+    Args <: Tuple: Type,
+    Name <: String: Type,
+    Lists <: Tuple: Type,
+  ](
     args: Expr[? <: Tuple],
     raw: Expr[RawRpc[Raw]],
     ec: Expr[ExecutionContext],
-    lists: Expr[List[Int]],
   )(using Quotes,
   ): Expr[?] =
-    import quotes.reflect.*
-    // Recover positional argument terms from the args tuple, each cast to its exact declared type, so
-    // the per-param `AsRaw[Raw, t]` encoder applies as the source would. `A` carries no `Product`
-    // bound (see `handlerFor`), so `args` is cast to `Product` here — safe, since every `A` this is
-    // called with (`EmptyTuple` or a `NamedTuple`) IS one at runtime.
-    val flatArgTerms: List[Expr[?]] = TupleTraverse.traverseTuple[Args, Any].zipWithIndex.map { case ('[t], i) =>
-      '{ $args(${ Expr(i) }).asInstanceOf[t] }
-    }
-
-    val invocation =
-      val encodedArgs: List[Expr[Raw]] = flatArgTerms.map { case '{ $arg: arg } =>
-        '{ scala.compiletime.summonInline[AsRaw[Raw, arg]].asRaw($arg) }
-      }
-
-      val sizes = lists.valueOrAbort
-      val nested: List[List[Expr[Raw]]] = splitBySizes(encodedArgs, sizes)
-      val nestedExprs: List[Expr[List[Raw]]] = nested.map(inner => Expr.ofList(inner))
-      val argsExpr: Expr[List[List[Raw]]] = Expr.ofList(nestedExprs)
-
-      '{ RawInvocation[Raw](compiletime.constValue[Name], $argsExpr) }
-
     /** Splits `items` into consecutive groups of the given `sizes` (the inverse of `flatten`). */
     def splitBySizes[A](items: List[A], sizes: List[Int]): List[List[A]] =
       sizes
@@ -80,6 +78,27 @@ object Handler:
         }
         .acc
         .reverse
+
+    // Recover positional argument terms from the args tuple, each cast to its exact declared type, so
+    // the per-param `AsRaw[Raw, t]` encoder applies as the source would. `Args` carries no `Product`
+    // bound, so `args` is cast to `Product` here — safe, since every `Args` this is called with
+    // (`EmptyTuple` or a `NamedTuple`) IS one at runtime.
+    val flatArgTerms: List[Expr[?]] = TupleTraverse.traverseTuple[Args, Any].zipWithIndex.map {
+      case ('[t], i) => '{ $args(${ Expr(i) }).asInstanceOf[t] }
+      case (_, _) => ???
+    }
+
+    val invocation =
+      val encodedArgs: List[Expr[Raw]] = flatArgTerms.map { case '{ $arg: arg } =>
+        '{ scala.compiletime.summonInline[AsRaw[Raw, arg]].asRaw($arg) }
+      }
+
+      val sizes = Type.valueOfTuple[Lists].get.toList.asInstanceOf[List[Int]]
+      val nested: List[List[Expr[Raw]]] = splitBySizes(encodedArgs, sizes)
+      val nestedExprs: List[Expr[List[Raw]]] = nested.map(inner => Expr.ofList(inner))
+      val argsExpr: Expr[List[List[Raw]]] = Expr.ofList(nestedExprs)
+
+      '{ RawInvocation[Raw](compiletime.constValue[Name], $argsExpr) }
 
     Type.of[Plan] match
       case '[{ type ArityInfo = ArityTag.Fire }] =>
