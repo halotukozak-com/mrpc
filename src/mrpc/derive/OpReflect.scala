@@ -6,12 +6,12 @@ import scala.quoted.*
 
 /**
  * One parameter's label, declared type, and raw per-param `Metadata` — a refined `Param` type,
- * mirroring made's own `InputElem` shape, rather than a value: [[OpReflect.inputElems]] never leaves
- * this package other than to feed [[Matcher]]/[[MetadataDerivation]]'s own macro-time classification,
- * so it never needs to exist as a runtime value. Read back via [[OpReflect.labelOf]]/`metadataEntries`/
- * `paramHasVerbatim`, or directly via a `case '[Param { type ParamType = t }] => ...` quote pattern at
- * the (few) call sites that only need one field once, same as [[OpPlan]] is read back via
- * [[PlanReflect]].
+ * mirroring made's own `InputElem` shape, rather than a value: it never leaves this package other than
+ * to feed [[Matcher]]/[[MetadataDerivation]]'s own macro-time classification, so it never needs to
+ * exist as a runtime value. Read back via `metadataEntries`/`paramHasVerbatim`, or directly via a
+ * `case '[Param { type ParamType = t }] => ...` quote pattern at the (few) call sites that only need
+ * one field once, same as [[OpPlan]] is read back via local quote-pattern matches in [[Matcher]] /
+ * [[AsRawDerivation]] / [[AsRealDerivation]].
  */
 private[mrpc] sealed trait Param:
   type Label <: String
@@ -105,7 +105,7 @@ private[mrpc] object OpReflect:
       case _ => false
 
   /** Extracts a constant `String` constructor argument named `field` from an annotation term. */
-  private def extractStringArg(using q: Quotes)(annot: q.reflect.Term, field: String): Option[String] =
+  private[derive] def extractStringArg(using q: Quotes)(annot: q.reflect.Term, field: String): Option[String] =
     import q.reflect.*
     constructorArgs(annot)
       .get(field)
@@ -113,7 +113,7 @@ private[mrpc] object OpReflect:
         case Literal(StringConstant(s)) => s
 
   /** Extracts a constant `Boolean` constructor argument named `field` (default `false`). */
-  private def extractBooleanArg(using q: Quotes)(annot: q.reflect.Term, field: String): Boolean =
+  private[derive] def extractBooleanArg(using q: Quotes)(annot: q.reflect.Term, field: String): Boolean =
     import q.reflect.*
     constructorArgs(annot).get(field) match
       case Some(Literal(BooleanConstant(b))) => b

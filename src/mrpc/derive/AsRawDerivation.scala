@@ -4,7 +4,6 @@ import made.{Done, DoneOperation}
 import mrpc.conv.{AsRaw, AsReal}
 import mrpc.raw.{RawInvocation, RawRpc}
 
-import scala.annotation.tailrec
 import scala.concurrent.{ExecutionContext, Future}
 import scala.quoted.*
 
@@ -134,10 +133,8 @@ object AsRawDerivation:
   )(using Quotes,
   ): Expr[Unit] =
     val arms = plans.filter(p =>
-      (p.opType.runtimeChecked match
-        case '[OpPlan { type ArityInfo = a }] => Type.of[a]
-      ) match
-        case '[ArityTag.Fire] => true
+      p.opType match
+        case '[{ type ArityInfo = ArityTag.Fire }] => true
         case _ => false,
     )
     matchOnName[Raw, Unit](inv, arms, '{ () }) { plan =>
@@ -160,10 +157,8 @@ object AsRawDerivation:
         case _ => false,
     )
     matchOnName[Raw, Future[Raw]](inv, arms, reject(inv)) { plan =>
-      (plan.opType.runtimeChecked match
-        case '[OpPlan { type ArityInfo = a }] => Type.of[a]
-      ) match
-        case '[ArityTag.CallOf[r]] =>
+      plan.opType match
+        case '[{ type ArityInfo = ArityTag.CallOf[r] }] =>
           val resultExpr = invokeOp[Raw, Real, Future[r]](api, inv, plan, done)
           // Compose the leaf result encoder over Future via `forFuture`, threading the
           // companion-supplied ExecutionContext — never a global one. The encoder is resolved in
@@ -191,10 +186,8 @@ object AsRawDerivation:
         case _ => false,
     )
     matchOnName[Raw, RawRpc[Raw]](inv, arms, reject(inv)) { plan =>
-      (plan.opType.runtimeChecked match
-        case '[OpPlan { type ArityInfo = a }] => Type.of[a]
-      ) match
-        case '[ArityTag.GetOf[sub]] =>
+      plan.opType match
+        case '[{ type ArityInfo = ArityTag.GetOf[sub] }] =>
           val subInstance = invokeOp[Raw, Real, sub](api, inv, plan, done)
           '{
             AsRaw
@@ -259,18 +252,12 @@ object AsRawDerivation:
         '{ scala.compiletime.summonInline[AsReal[Raw, t]].asReal($flatArgs(${ Expr(i) })) }
       case (_, _) => ???
 
-    // todo: im not sure its required
-    @tailrec
-    def nth[T <: Tuple: Type](n: Int): Type[?] = Type.of[T] match
-      case '[h *: tail] => if n == 0 then Type.of[h] else nth[tail](n - 1)
-
-    val operation: Expr[? <: DoneOperation { type OuterType = Real }] = done match
-      case '{ type operations <: Tuple; $_ : { type Operations = operations } } =>
-        nth[operations](plan.index) match
-          case '[type op <: DoneOperation { type OuterType = Real; type OutputType = R }; op] =>
-            '{ $done.operations(${ Expr(plan.index) }).asInstanceOf[op] }
-          case '[type op <: DoneOperation { type OuterType = Real; type OutputType = Unit }; op] =>
-            '{ $done.operations(${ Expr(plan.index) }).asInstanceOf[op] }
+    // `plan.opType`'s `OpType` member IS the underlying `DoneOperation` — no need to re-walk
+    // `done`'s `Operations` tuple by index to recover it. The final `.asInstanceOf[R]` below makes
+    // an `OutputType`/`R` correspondence unnecessary here too.
+    val operation: Expr[? <: DoneOperation { type OuterType = Real }] = plan.opType match
+      case '[type op <: DoneOperation { type OuterType = Real }; OpPlan { type OpType = op }] =>
+        '{ $done.operations(${ Expr(plan.index) }).asInstanceOf[op] }
 
     val argsTuple = Expr.ofRefinedTuple(decodedArgs)
 

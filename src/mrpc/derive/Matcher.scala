@@ -33,16 +33,15 @@ private[mrpc] object Matcher:
    * Classifies every operation of `T` into an [[OpPlan]] and folds the results into a `Plans <:
    * Tuple` type — one [[OpPlan]] per `Done.Operations` entry, in the same order — mirroring how
    * `Done` itself models `T` as a `Tuple` of `DoneOperation`s. rpcName resolution (incl. overload
-   * disambiguation + duplicate detection) is delegated to [[RpcName.computeAll]]. The `Done` mirror
-   * is passed in (summoned once at the entry point via [[summonDone]]), not re-summoned here.
+   * disambiguation + duplicate detection) is delegated to [[RpcNames]]. The `Done` mirror is passed
+   * in (summoned once at the call site via the `Done.Of as done` context bound), not re-summoned here.
    */
   def planAll[T: Type](done: Expr[Done.Of[T]], names: Expr[RpcNames[T]])(using Quotes): Type[? <: Tuple] =
     val ops = done match
       case '{ type operations <: Tuple; $_ : { type Operations = operations } } =>
         TupleTraverse.traverseTuple[operations, DoneOperation]
-    // Names come from the single authority `RpcNames[T]` (type-level `Names`, read back by `namesOf`).
-    // `namesOf` falls back to a direct `computeAll` when the mirror can't be summoned, so the
-    // duplicate-name abort still surfaces verbatim (see CompileErrorSuite).
+    // Names come from the single authority `RpcNames[T]` (type-level `Names`, read back by `namesOf`);
+    // `RpcNames.derived`'s own `errorAndAbort` on a duplicate name surfaces at its summon site.
     val resolvedNames = RpcNames.namesOf[T](names)
     val planTypes: List[Type[?]] = ops.zip(resolvedNames).map(planOne)
     TupleTraverse.foldTuple(planTypes)
@@ -50,8 +49,7 @@ private[mrpc] object Matcher:
   /**
    * The consumer-facing entry point: [[planAll]]'s `Plans` tuple, traversed back into the
    * `List[Type[?]]` of individual [[OpPlan]]s the server adapter and client proxy macros actually
-   * iterate over — each queried on demand via local quote-pattern reads on the plan's `Type[?]`, same
-   * as [[operationTypes]]'s list of `DoneOperation` types is queried via [[OpReflect]].
+   * iterate over — each queried on demand via local quote-pattern reads on the plan's `Type[?]`.
    */
   def plans[T: Type](done: Expr[Done.Of[T]], names: Expr[RpcNames[T]])(using Quotes): List[Type[? <: OpPlan]] =
     planAll[T](done, names) match

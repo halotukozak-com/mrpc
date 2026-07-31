@@ -16,21 +16,23 @@ import scala.quoted.*
  *   - `@composite`                     -> recurse `buildValue` over the param type's primary ctor against
  *                                         the SAME real-symbol context (NameInfo flattening; Pitfall 3).
  *   - `@reifyName`                     -> the made `label` (source name) of the current op/param.
- *   - `@reifyName(useRawName = true)`  -> the RESOLVED rpcName ([[RpcName.computeAll]]) — == the engine's.
+ *   - `@reifyName(useRawName = true)`  -> the RESOLVED rpcName ([[RpcNames]]'s resolution) — == the engine's.
  *   - `@reifyAnnot` (arity-shaped)     -> the real annotation instance(s), read via the made `getAnnotation`
  *                                         idiom. `@single`/`A` -> the instance (aborts if absent);
  *                                         `@optional`/`Option[A]` -> `Option`; `@multi`/`List[A]` -> ALL
  *                                         matching annotations on the symbol (the mrpc-owned collect-all walk).
  *   - `@infer`                         -> `Implicits.search[paramType]`; aborts with the `@infer` clue if absent.
- *   - `@rpcMethodMetadata` (arity)     -> projects over [[Matcher.operationTypes]]: `@multi` -> `List`/
- *                                         `Map[String, _]` (keyed by rpcName); `@optional` -> `Option`;
- *                                         `@single` -> exactly one (compile error on 0/>1).
- *   - `@rpcParamMetadata` (arity)      -> projects over [[OpReflect.inputElems]] (declaration order), same
- *                                         arity shaping; `Map` slots keyed by paramName.
+ *   - `@rpcMethodMetadata` (arity)     -> projects over the trait's ops (`Context.Trait`'s captured
+ *                                         `Ops`/`Names`): `@multi` -> `List`/`Map[String, _]` (keyed by
+ *                                         rpcName); `@optional` -> `Option`; `@single` -> exactly one
+ *                                         (compile error on 0/>1).
+ *   - `@rpcParamMetadata` (arity)      -> projects over the op's `InputElems` (declaration order, via
+ *                                         [[OpReflect]]/[[TupleTraverse]]), same arity shaping; `Map`
+ *                                         slots keyed by paramName.
  *
- * No-fork guarantee: resolved rpcNames come from [[RpcName.computeAll]] and the op set from
- * [[Matcher.operationTypes]] — the SAME engine introspection the matcher/dispatcher use. The metadata
- * cannot drift from what the engine dispatches.
+ * No-fork guarantee: resolved rpcNames come from [[RpcNames]] and the op set from `Done.Of[Real]` —
+ * the SAME engine introspection the matcher/dispatcher use. The metadata cannot drift from what the
+ * engine dispatches.
  *
  * Pitfall-3 (`@composite`): the per-element build threads a [[Context]] (the current op / param `Type`),
  * and `@composite` recurses with the SAME `Context` so the nested class's `@reifyName` reads the real
@@ -148,16 +150,7 @@ private[mrpc] object MetadataDerivation:
 
   /** Reads `@reifyName`'s `useRawName` boolean off the annotation term (default false). */
   private def reifyNameUseRaw(using Quotes)(annot: quotes.reflect.Term): Boolean =
-    import quotes.reflect.*
-    def collectArgs(t: Term): List[Term] = t match
-      case Apply(fun, args) => collectArgs(fun) ++ args
-      case TypeApply(fun, _) => collectArgs(fun)
-      case _ => Nil
-    collectArgs(annot).exists {
-      case Literal(BooleanConstant(b)) => b
-      case NamedArg(_, Literal(BooleanConstant(b))) => b
-      case _ => false
-    }
+    OpReflect.extractBooleanArg(annot, "useRawName")
 
   /** `@reifyName`: source label or, when `useRaw`, the resolved rpcName for the current context. */
   private def reifyName(using Quotes)(ctx: Context, useRaw: Boolean): Type[? <: String] =
@@ -235,15 +228,7 @@ private[mrpc] object MetadataDerivation:
 
   /** Reads `@infer`'s `clue` string off the annotation term. */
   private def inferClue(using Quotes)(annot: quotes.reflect.Term): Option[String] =
-    import quotes.reflect.*
-    def collectArgs(t: Term): List[Term] = t match
-      case Apply(fun, args) => collectArgs(fun) ++ args
-      case TypeApply(fun, _) => collectArgs(fun)
-      case _ => Nil
-    collectArgs(annot).collectFirst {
-      case Literal(StringConstant(s)) => s
-      case NamedArg(_, Literal(StringConstant(s))) => s
-    }
+    OpReflect.extractStringArg(annot, "clue")
 
   /**
    * `@rpcMethodMetadata`: projects over the trait's ops. Arity-shaped:

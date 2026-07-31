@@ -6,7 +6,7 @@ import scala.quoted.*
 
 /**
  * Whole-trait resolved RPC names lifted to the type level: `RpcNames[T].Names` is a tuple of singleton
- * string types — one per operation, in `Done.Operations` order — equal to [[RpcName.computeAll]]'s
+ * string types — one per operation, in `Done.Operations` order — equal to [[RpcNames.deriveImpl]]'s
  * result. `names` is the same tuple as a runtime value.
  *
  * Deliberately NOT a per-op typeclass derived independently for each operation and folded via
@@ -14,8 +14,8 @@ import scala.quoted.*
  * `Tuple.Map`'s per-element type-variable inference, which drops any `MetaAnnotation` the op carries
  * (e.g. `@multi`) — annotations don't survive being abstracted into a generic type variable. Instead
  * `RpcNames` walks `Done.Operations` reflectively in ONE PASS (annotations stay intact in `TypeRepr`),
- * reads `@rpcName`/`@rpcNamePrefix` terms and computes overload suffixes value-side via
- * [[RpcName.computeAll]], then EMITS the resolved names as types — which is exactly what
+ * reads `@rpcName`/`@rpcNamePrefix` terms and computes overload suffixes value-side (see `baseName`/
+ * `applyPrefix`/`overloadSuffix` below), then EMITS the resolved names as types — which is exactly what
  * `Tuple.Map`/match types cannot do. **Annotation-proof** by construction.
  */
 sealed trait RpcNames[T]:
@@ -28,8 +28,9 @@ object RpcNames:
   /**
    * Reads the resolved names back off `RpcNames[T].Names` (the type-level singletons) as a `List`,
    * in `Done.Operations` order. The single name-resolution authority for macro consumers (engine,
-   * metadata): the type-level names lowered to values, rather than each caller re-running
-   * `RpcName.computeAll`. The mirror is summoned once via [[summonNames]] and threaded in.
+   * metadata): the type-level names lowered to values, rather than each caller re-deriving
+   * `RpcNames[T]` itself. The mirror is summoned once at each macro entry point (via the
+   * `RpcNames as names` context bound) and threaded in here.
    */
   private[derive] def namesOf[T: Type](rpcNames: Expr[RpcNames[T]])(using Quotes): List[Type[? <: String]] =
     rpcNames.runtimeChecked match
