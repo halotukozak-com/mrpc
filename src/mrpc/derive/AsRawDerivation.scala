@@ -24,14 +24,6 @@ import scala.quoted.*
 object AsRawDerivation:
 
   /**
-   * One [[OpPlan]] type paired with its position in `Done.Operations` (assigned ONCE, right off
-   * [[Matcher.plans]], before any arity filtering) — [[selectOperation]] needs the index to pick the
-   * matching element back off `done.operations`; everything else about the plan is queried on demand
-   * from `opType` via local quote-pattern reads (`arityOf`/`paramTypesOf`/...).
-   */
-  private type Plan = (opType: Type[?], index: Int)
-
-  /**
    * The server-adapter conversion as a plain value: `asRaw` wraps a `Real` in the `RawRpc[Raw]` built
    * by [[buildRawRpc]]. The `AsRaw` wrapper is ordinary Scala (a SAM lambda); only the `RawRpc` itself
    * — its arity-partitioned `fire`/`call`/`get` dispatch — is generated.
@@ -98,7 +90,7 @@ object AsRawDerivation:
     names: Expr[RpcNames[Real]],
   )(using Quotes,
   ): Expr[Unit] =
-    fireBody[Raw, Real](api, inv, planPairs[Real](done, names), done)
+    fireBody[Raw, Real](api, inv, Matcher.plans[Real](done, names), done)
 
   private def callDispatchImpl[Raw: Type, Real: Type](
     api: Expr[Real],
@@ -108,7 +100,7 @@ object AsRawDerivation:
     ec: Expr[ExecutionContext],
   )(using Quotes,
   ): Expr[Future[Raw]] =
-    callBody[Raw, Real](api, inv, planPairs[Real](done, names), ec, done)
+    callBody[Raw, Real](api, inv, Matcher.plans[Real](done, names), ec, done)
 
   private def getDispatchImpl[Raw: Type, Real: Type](
     api: Expr[Real],
@@ -117,49 +109,49 @@ object AsRawDerivation:
     names: Expr[RpcNames[Real]],
   )(using Quotes,
   ): Expr[RawRpc[Raw]] =
-    getBody[Raw, Real](api, inv, planPairs[Real](done, names), done)
-
-  /** Classifies `Real`'s operations into [[Plan]]s, indexed by position in `Done.Operations`. */
-  private def planPairs[Real: Type](done: Expr[Done.Of[Real]], names: Expr[RpcNames[Real]])(using Quotes): List[Plan] =
-    Matcher.plans[Real](done, names).zipWithIndex.map((t, i) => (opType = t, index = i))
+    getBody[Raw, Real](api, inv, Matcher.plans[Real](done, names), done)
 
   // --- arity-partitioned dispatch bodies ---
 
   private def fireBody[Raw: Type, Real: Type](
     api: Expr[Real],
     inv: Expr[RawInvocation[Raw]],
-    plans: List[Plan],
+    plans: List[Type[? <: OpPlan]],
     done: Expr[Done.Of[Real]],
   )(using Quotes,
   ): Expr[Unit] =
-    val arms = plans.filter(p =>
-      p.opType match
+    // `zipWithIndex` HERE (not upfront in some shared pre-computed list) is what makes `index` mean
+    // "position in `Done.Operations`": the filter below drops entries, so an index taken from the
+    // FILTERED list would point at the wrong operation once `invokeOp` uses it to read
+    // `done.operations(index)`.
+    val arms = plans.zipWithIndex.filter((opType, _) =>
+      opType match
         case '[{ type ArityInfo = ArityTag.Fire }] => true
         case _ => false,
     )
-    matchOnName[Raw, Unit](inv, arms, '{ () }) { plan =>
-      '{ ${ invokeOp[Raw, Real, Any](api, inv, plan, done) }: Unit }
+    matchOnName[Raw, Unit](inv, arms, '{ () }) { (opType, index) =>
+      '{ ${ invokeOp[Raw, Real, Any](api, inv, opType, index, done) }: Unit }
     }
 
   private def callBody[Raw: Type, Real: Type](
     api: Expr[Real],
     inv: Expr[RawInvocation[Raw]],
-    plans: List[Plan],
+    plans: List[Type[? <: OpPlan]],
     ec: Expr[ExecutionContext],
     done: Expr[Done.Of[Real]],
   )(using Quotes,
   ): Expr[Future[Raw]] =
-    val arms = plans.filter(p =>
-      (p.opType.runtimeChecked match
+    val arms = plans.zipWithIndex.filter((opType, _) =>
+      (opType.runtimeChecked match
         case '[OpPlan { type ArityInfo = a }] => Type.of[a]
       ) match
         case '[ArityTag.CallOf[?]] => true
         case _ => false,
     )
-    matchOnName[Raw, Future[Raw]](inv, arms, reject(inv)) { plan =>
-      plan.opType match
+    matchOnName[Raw, Future[Raw]](inv, arms, reject(inv)) { (opType, index) =>
+      opType match
         case '[{ type ArityInfo = ArityTag.CallOf[r] }] =>
-          val resultExpr = invokeOp[Raw, Real, Future[r]](api, inv, plan, done)
+          val resultExpr = invokeOp[Raw, Real, Future[r]](api, inv, opType, index, done)
           // Compose the leaf result encoder over Future via `forFuture`, threading the
           // companion-supplied ExecutionContext — never a global one. The encoder is resolved in
           // the generated code via `summonInline` (which reports a missing `AsRaw[Raw, r]` itself).
@@ -174,21 +166,21 @@ object AsRawDerivation:
   private def getBody[Raw: Type, Real: Type](
     api: Expr[Real],
     inv: Expr[RawInvocation[Raw]],
-    plans: List[Plan],
+    plans: List[Type[? <: OpPlan]],
     done: Expr[Done.Of[Real]],
   )(using Quotes,
   ): Expr[RawRpc[Raw]] =
-    val arms = plans.filter(p =>
-      (p.opType.runtimeChecked match
+    val arms = plans.zipWithIndex.filter((opType, _) =>
+      (opType.runtimeChecked match
         case '[OpPlan { type ArityInfo = a }] => Type.of[a]
       ) match
         case '[ArityTag.GetOf[?]] => true
         case _ => false,
     )
-    matchOnName[Raw, RawRpc[Raw]](inv, arms, reject(inv)) { plan =>
-      plan.opType match
+    matchOnName[Raw, RawRpc[Raw]](inv, arms, reject(inv)) { (opType, index) =>
+      opType match
         case '[{ type ArityInfo = ArityTag.GetOf[sub] }] =>
-          val subInstance = invokeOp[Raw, Real, sub](api, inv, plan, done)
+          val subInstance = invokeOp[Raw, Real, sub](api, inv, opType, index, done)
           '{
             AsRaw
               .makeLazy[RawRpc[Raw], sub](compiletime.summonInline[AsRaw[RawRpc[Raw], sub]])
@@ -206,29 +198,28 @@ object AsRawDerivation:
    */
   private def matchOnName[Raw: Type, Res: Type](
     inv: Expr[RawInvocation[Raw]],
-    plans: List[Plan],
+    plans: List[(Type[? <: OpPlan], Int)],
     reject: Expr[Res],
   )(
-    arm: Plan => Expr[Res],
+    arm: (Type[? <: OpPlan], Int) => Expr[Res],
   )(using Quotes,
   ): Expr[Res] =
     import quotes.reflect.*
     val scrutinee = '{ ${ inv }.rpcName }.asTerm
-    val caseDefs = plans.map { plan =>
-      val rpcName = plan.opType.runtimeChecked match
+    val caseDefs = plans.map { (opType, index) =>
+      val rpcName = opType.runtimeChecked match
         case '[type n <: String; OpPlan { type RpcName = n }] =>
           Type.valueOfConstant[n].getOrElse(report.errorAndAbort("RpcName is not a string literal")).toString
-      CaseDef(Literal(StringConstant(rpcName)), None, arm(plan).asTerm)
+      CaseDef(Literal(StringConstant(rpcName)), None, arm(opType, index).asTerm)
     }
     val default = CaseDef(Wildcard(), None, reject.asTerm)
     Match(scrutinee, caseDefs :+ default).asExprOf[Res]
 
   /** Each parameter's declared `ParamType`, in the op's declaration order, off `plan`'s `Params`. */
   private def paramTypesOf(plan: Type[?])(using Quotes): List[Type[?]] =
-    (plan.runtimeChecked match
+    plan.runtimeChecked match
       case '[type ps <: Tuple; OpPlan { type Params = ps }] =>
-        TupleTraverse.traverseTuple[ps, ParamPlan]
-    ).map { case '[ParamPlan { type ParamType = t }] => Type.of[t] }
+        TupleTraverse.traverseTuple[ps, ParamPlan].map { case '[ParamPlan { type ParamType = t }] => Type.of[t] }
 
   /**
    * Decodes the invocation's flat arguments to the operation's exact `InputElem.Type`s, assembles
@@ -241,23 +232,24 @@ object AsRawDerivation:
   private def invokeOp[Raw: Type, Real: Type, R: Type](
     api: Expr[Real],
     inv: Expr[RawInvocation[Raw]],
-    plan: Plan,
+    opType: Type[? <: OpPlan],
+    index: Int,
     done: Expr[Done.Of[Real]],
   )(using quotes: Quotes,
   ): Expr[R] =
     val flatArgs = '{ ${ inv }.args.flatten }
 
-    val decodedArgs: List[Expr[?]] = paramTypesOf(plan.opType).zipWithIndex.map:
+    val decodedArgs: List[Expr[?]] = paramTypesOf(opType).zipWithIndex.map:
       case ('[t], i) =>
         '{ scala.compiletime.summonInline[AsReal[Raw, t]].asReal($flatArgs(${ Expr(i) })) }
       case (_, _) => ???
 
-    // `plan.opType`'s `OpType` member IS the underlying `DoneOperation` — no need to re-walk
-    // `done`'s `Operations` tuple by index to recover it. The final `.asInstanceOf[R]` below makes
-    // an `OutputType`/`R` correspondence unnecessary here too.
-    val operation: Expr[? <: DoneOperation { type OuterType = Real }] = plan.opType match
+    // `opType`'s `OpType` member IS the underlying `DoneOperation` — no need to re-walk `done`'s
+    // `Operations` tuple by index to recover it. The final `.asInstanceOf[R]` below makes an
+    // `OutputType`/`R` correspondence unnecessary here too.
+    val operation: Expr[? <: DoneOperation { type OuterType = Real }] = opType match
       case '[type op <: DoneOperation { type OuterType = Real }; OpPlan { type OpType = op }] =>
-        '{ $done.operations(${ Expr(plan.index) }).asInstanceOf[op] }
+        '{ $done.operations(${ Expr(index) }).asInstanceOf[op] }
 
     val argsTuple = Expr.ofRefinedTuple(decodedArgs)
 
