@@ -30,30 +30,21 @@ private[mrpc] object Matcher:
         Type.valueOfConstant[l].getOrElse(quotes.reflect.report.errorAndAbort("Label is not a string literal")).toString
 
   /**
-   * Classifies every operation of `T` into an [[OpPlan]] and folds the results into a `Plans <:
-   * Tuple` type — one [[OpPlan]] per `Done.Operations` entry, in the same order — mirroring how
-   * `Done` itself models `T` as a `Tuple` of `DoneOperation`s. rpcName resolution (incl. overload
-   * disambiguation + duplicate detection) is delegated to [[RpcNames]]. The `Done` mirror is passed
-   * in (summoned once at the call site via the `Done.Of as done` context bound), not re-summoned here.
+   * Classifies every operation of `T` into an [[OpPlan]] — one per `Done.Operations` entry, in the
+   * same order — the consumer-facing list the server adapter and client proxy macros iterate over,
+   * each queried on demand via local quote-pattern reads on the plan's `Type[?]`. rpcName resolution
+   * (incl. overload disambiguation + duplicate detection) is delegated to [[RpcNames]]. The `Done`
+   * mirror is passed in (summoned once at the call site via the `Done.Of as done` context bound), not
+   * re-summoned here.
    */
-  def planAll[T: Type](done: Expr[Done.Of[T]], names: Expr[RpcNames[T]])(using Quotes): Type[? <: Tuple] =
+  def plans[T: Type](done: Expr[Done.Of[T]], names: Expr[RpcNames[T]])(using Quotes): List[Type[? <: OpPlan]] =
     val ops = done match
       case '{ type operations <: Tuple; $_ : { type Operations = operations } } =>
         TupleTraverse.traverseTuple[operations, DoneOperation]
     // Names come from the single authority `RpcNames[T]` (type-level `Names`, read back by `namesOf`);
     // `RpcNames.derived`'s own `errorAndAbort` on a duplicate name surfaces at its summon site.
     val resolvedNames = RpcNames.namesOf[T](names)
-    val planTypes: List[Type[?]] = ops.zip(resolvedNames).map(planOne)
-    TupleTraverse.foldTuple(planTypes)
-
-  /**
-   * The consumer-facing entry point: [[planAll]]'s `Plans` tuple, traversed back into the
-   * `List[Type[?]]` of individual [[OpPlan]]s the server adapter and client proxy macros actually
-   * iterate over — each queried on demand via local quote-pattern reads on the plan's `Type[?]`.
-   */
-  def plans[T: Type](done: Expr[Done.Of[T]], names: Expr[RpcNames[T]])(using Quotes): List[Type[? <: OpPlan]] =
-    planAll[T](done, names) match
-      case '[type ps <: Tuple; ps] => TupleTraverse.traverseTuple[ps, OpPlan]
+    ops.zip(resolvedNames).map(planOne)
 
   /**
    * Exposes a SINGLE operation's [[OpPlan]] type directly to the CALLER's type checker —
@@ -108,7 +99,7 @@ private[mrpc] object Matcher:
     Expr.ofRefinedTuple(nulls)
 
   /** Classifies a single operation type into a refined [[OpPlan]] type using its resolved rpcName. */
-  private def planOne(opAndName: (Type[?], Type[? <: String]))(using Quotes): Type[?] =
+  private def planOne(opAndName: (Type[?], Type[? <: String]))(using Quotes): Type[? <: OpPlan] =
     import quotes.reflect.*
     val (opType, rpcName) = opAndName
     val arityType = opType match
