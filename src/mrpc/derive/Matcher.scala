@@ -68,7 +68,7 @@ private[mrpc] object Matcher:
     val label = Type.valueOfConstant[L].getOrElse(report.errorAndAbort("L must be a literal string")).toString
     val idx = ops.indexWhere(op => labelOf(op) == label)
     if idx < 0 then report.errorAndAbort(s"no operation labeled '$label' in ${TypeRepr.of[T].show}")
-    planOne((ops(idx), resolvedNames(idx))) match
+    planOne(ops(idx), resolvedNames(idx)) match
       case '[type p <: OpPlan; p] => '{ null.asInstanceOf[p] }
       case _ => report.errorAndAbort(s"could not build OpPlan for label '$label'")
 
@@ -99,9 +99,8 @@ private[mrpc] object Matcher:
     Expr.ofRefinedTuple(nulls)
 
   /** Classifies a single operation type into a refined [[OpPlan]] type using its resolved rpcName. */
-  private def planOne(opAndName: (Type[?], Type[? <: String]))(using Quotes): Type[? <: OpPlan] =
+  private def planOne(opType: Type[?], rpcName: Type[? <: String])(using Quotes): Type[? <: OpPlan] =
     import quotes.reflect.*
-    val (opType, rpcName) = opAndName
     val arityType = opType match
       case '[{ type OutputType = Unit }] => Type.of[ArityTag.Fire]
       case '[{ type OutputType = Future[x] }] => Type.of[ArityTag.CallOf[x]]

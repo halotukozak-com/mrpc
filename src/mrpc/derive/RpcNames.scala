@@ -23,7 +23,13 @@ sealed trait RpcNames[T]:
   def names: Names
 
 object RpcNames:
-  transparent inline given derived[T: Done.Of as done]: RpcNames[T] = ${ deriveImpl[T]('done) }
+  transparent inline given derived[T: Done.Of as done]: RpcNames[T] = ${
+    deriveImpl[T, Tuple.Map[
+      done.Operations,
+      [Op] =>> Op match
+        case ([l0 <: String] =>> DoneOperation { type Label = l0 })[l] => l,
+    ]]('done)
+  }
 
   /**
    * Reads the resolved names back off `RpcNames[T].Names` (the type-level singletons) as a `List`,
@@ -36,7 +42,7 @@ object RpcNames:
     rpcNames.runtimeChecked match
       case '{ type ns <: Tuple; $_ : RpcNames[T] { type Names = ns } } => TupleTraverse.traverseTuple[ns, String]
 
-  private def deriveImpl[T: Type](done: Expr[Done.Of[T]])(using Quotes): Expr[RpcNames[T]] =
+  private def deriveImpl[T: Type, Labels <: Tuple:Type](done: Expr[Done.Of[T]])(using Quotes): Expr[RpcNames[T]] =
     import quotes.reflect.*
     val ops = done match
       case '{ type operations <: Tuple; $_ : { type Operations = operations } } =>
@@ -56,9 +62,7 @@ object RpcNames:
         if overloaded && !OpReflect.hasAnnotation[mrpc.annotation.rpcName](op) then prefixed + overloadSuffix(op)
         else prefixed
 
-    val labels = ops.map{
-      case '[type l <: String; { type Label = l }] => Type.valueOfConstant[l].getOrElse(report.errorAndAbort("Label is not a string literal")).toString
-    }
+    val labels = Type.valueOfTuple[Labels].get.toList.asInstanceOf[List[String]]
 
     detectDuplicates(labels, resolved)
 

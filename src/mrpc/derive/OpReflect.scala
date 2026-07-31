@@ -49,14 +49,7 @@ private[mrpc] object OpReflect:
   def paramListSizes(opType: Type[?])(using Quotes): List[Int] =
     opType match
       case '[type lists <: Tuple; DoneOperation { type ParamLists = lists }] =>
-        TupleTraverse.traverseTuple[lists, Int].map {
-          case '[type n <: Int; n] =>
-            Type
-              .valueOfConstant[n]
-              .getOrElse(quotes.reflect.report.errorAndAbort("ParamLists entry is not an Int literal"))
-          case other =>
-            quotes.reflect.report.errorAndAbort(s"ParamLists entry is not an Int literal: ${Type.show(using other)}")
-        }
+        Type.valueOfTuple[lists].get.toList.asInstanceOf[List[Int]]
       case _ => quotes.reflect.report.errorAndAbort(s"no ParamLists member on ${Type.show(using opType)}")
 
   /** The op's (or param's) `Metadata` tuple entries as types (each an `AnnotatedType(Meta, annot)`). */
