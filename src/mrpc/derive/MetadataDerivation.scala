@@ -110,22 +110,31 @@ private[mrpc] object MetadataDerivation:
     def annotOf[A: {Type, FromExpr}]: Option[A] =
       param.annotations.find(_.tpe <:< TypeRepr.of[A]).flatMap(_.asExprOf[A].value)
 
-    // The arity marker steering collection / single / optional slot shapes. Default is @single.
-    val arity = arityOf(param)
+    val arity = if has[mrpc.annotation.multi] then SlotArity.Multi
+    else if has[mrpc.annotation.optional] then SlotArity.Optional
+    else SlotArity.Single
 
     if has[mrpc.annotation.composite] then composite[Param](ctx)
     else if has[mrpc.annotation.reifyName] then
       val useRaw = annotOf[mrpc.annotation.reifyName].exists(_.useRawName)
       Expr(Type.valueOfConstant(using reifyName(ctx, useRaw)).get)
     else if has[mrpc.annotation.reifyAnnot] then reifyAnnot[Param](ctx, arity)
-    else if has[mrpc.annotation.infer] then infer[Param](param)
     else if has[mrpc.annotation.rpcMethodMetadata] then rpcMethodMetadata[Param](param.name, ctx, arity)
     else if has[mrpc.annotation.rpcParamMetadata] then rpcParamMetadata[Param](param.name, ctx, arity)
     else
-      report.errorAndAbort(
-        s"metadata param '${param.name}' has no recognized steering annotation " +
-          "(@composite/@reifyName/@reifyAnnot/@infer/@rpcMethodMetadata/@rpcParamMetadata)",
-      )
+      annotOf[mrpc.annotation.infer] match
+        case Some(annot) =>
+          Expr
+            .summon[Param]
+            .getOrElse:
+              val clue = Option(annot.clue).filter(_.nonEmpty).map(c => s" ($c)").getOrElse("")
+              report.errorAndAbort(s"@infer: no given instance for ${Type.show[Param]}$clue")
+
+        case None =>
+          report.errorAndAbort(
+            s"metadata param '${param.name}' has no recognized steering annotation " +
+              "(@composite/@reifyName/@reifyAnnot/@infer/@rpcMethodMetadata/@rpcParamMetadata)",
+          )
 
   /**
    * The collection-arity marker on a metadata param. `@multi` -> a collection slot; `@optional` ->
@@ -133,13 +142,6 @@ private[mrpc] object MetadataDerivation:
    */
   private enum SlotArity:
     case Single, Optional, Multi
-
-  private def arityOf(using Quotes)(param: quotes.reflect.Symbol): SlotArity =
-    import quotes.reflect.*
-    def has[A: Type]: Boolean = param.annotations.exists(_.tpe <:< TypeRepr.of[A])
-    if has[mrpc.annotation.multi] then SlotArity.Multi
-    else if has[mrpc.annotation.optional] then SlotArity.Optional
-    else SlotArity.Single
 
   /**
    * `@composite`: the param's type C is a class with a public primary ctor; recurse `buildValue(C, ctx)`
@@ -208,22 +210,6 @@ private[mrpc] object MetadataDerivation:
             report.errorAndAbort(
               s"@single @reifyAnnot: no annotation ${Type.show[Param]} present on the RPC element",
             )
-
-  /** `@infer`: implicit search for the param's declared type; aborts with the `@infer` clue if absent. */
-  private def infer[Param: Type](using Quotes)(param: quotes.reflect.Symbol): Expr[Any] =
-    import quotes.reflect.*
-    Expr
-      .summon[Param]
-      .getOrElse:
-        val clue = param.annotations
-          .find(_.tpe <:< TypeRepr.of[mrpc.annotation.infer])
-          .map(_.asExprOf[mrpc.annotation.infer])
-          .flatMap(_.value)
-          .map(_.clue)
-          .filter(_.nonEmpty)
-          .map(c => s" ($c)")
-          .getOrElse("")
-        report.errorAndAbort(s"@infer: no given instance for ${Type.show[Param]}$clue")
 
   /**
    * `@rpcMethodMetadata`: projects over the trait's ops. Arity-shaped:
