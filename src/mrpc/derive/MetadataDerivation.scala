@@ -52,10 +52,12 @@ private[mrpc] object MetadataDerivation:
   private sealed trait Context
   private object Context:
     /** The whole real trait: ops + their resolved names, in `Done` order. */
-    sealed abstract class Trait extends Context:
+    sealed trait Trait extends Context:
       type Ops <: Tuple /* of DoneOperation */
-
       type Names <: Tuple /* of String */
+
+      given Ops containsOnly made.DoneOperation = compiletime.deferred
+      given Names containsOnly String = compiletime.deferred
 
       def operations: Ops
 
@@ -181,9 +183,7 @@ private[mrpc] object MetadataDerivation:
   inline private def reifyName(inline useRaw: Boolean)(using Context): String = inline ctx match
     case ctx: Context.Method =>
       inline if useRaw then compiletime.constValue[ctx.Name]
-      else
-        ???
-        // compiletime.constValue[ctx.op.Label]
+      else compiletime.constValue[ctx.op.Label]
     case ctx: Context.Param =>
       compiletime.constValue[ctx.underlying.Label]
     case _: Context.Trait => compiletime.error("@reifyName is not valid at the trait level (no single name)")
@@ -238,14 +238,14 @@ private[mrpc] object MetadataDerivation:
    * Each element recurses `buildValue` in a per-op [[Context.Method]].
    */
 
-  inline private def buildAllElems[e, name <: String](acc231: Tuple): Tuple =
-    inline acc231 match
-      case _: EmptyTuple => EmptyTuple
-      case _: (head *: tail) =>
+  inline private def buildAllElems[e, Names <: Tuple](acc231: Tuple)(using Names containsOnly String): Tuple =
+    inline (acc231, compiletime.erasedValue[Names]) match
+      case (_: EmptyTuple, _: EmptyTuple) => EmptyTuple
+      case (_: (head *: tail), _: (name *: names)) =>
         val head = acc231.head.asInstanceOf[head & DoneOperation]
         val tail = acc231.tail.asInstanceOf[tail]
 
-        buildElem[e, head.Type](using Context.Method[name](head)) *: buildAllElems[e, name](tail)
+        buildElem[e, head.Type](using Context.Method[name & String](head)) *: buildAllElems[e, Tuple.Tail[Names]](tail)
 
   inline private def buildAllElems2[e](acc238: Tuple): Tuple = inline acc238 match
     case _: EmptyTuple => EmptyTuple
@@ -266,18 +266,18 @@ private[mrpc] object MetadataDerivation:
     case '[type e <: Any; e] =>
       '{ buildValue[e](using compiletime.summonInline[Made.Of[e]], $ctx) }
 
-  inline private def rpcMethodMetadata[P, Name <: String](arity: SlotArity)(using Context.Trait): Any =
+  inline private def rpcMethodMetadata[P, Name <: String](arity: SlotArity)(using ctx: Context.Trait): Any =
     inline arity match
       case _: SlotArity.Multi =>
         inline compiletime.erasedValue[P] match
           case _: Map[String, e] =>
             NamedTuple
-              .build[ctx.Names]()(buildAllElems[e, Name](ctx.operations))
+              .build[ctx.Names]()(buildAllElems[e, ctx.Names](ctx.operations))
               .toList
               .asInstanceOf[List[(String, ?)]]
               .toMap
           case _: List[e] =>
-            buildAllElems[e, Name](ctx.operations).toList
+            buildAllElems[e, ctx.Names](ctx.operations).toList
       case _: SlotArity.Optional =>
         inline compiletime.erasedValue[P] match
           case _: Option[e] =>
