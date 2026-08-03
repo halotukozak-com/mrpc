@@ -17,6 +17,9 @@ private[mrpc] sealed trait Param:
   type Label <: String
   type ParamType
   type Metadata <: Tuple
+  
+object Param:
+  type Of[X] = Param{ type ParamType = X}
 
 /**
  * Reflection helpers that read the type-level members of a refined `DoneOperation` (and its
