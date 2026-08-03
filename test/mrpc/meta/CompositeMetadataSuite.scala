@@ -1,5 +1,8 @@
-package mrpc.meta
+package mrpc
+package meta
 
+import made.Made
+import made.Made.Of
 import mrpc.annotation.{composite, multi, reifyName, rpcMethodMetadata}
 import mrpc.derive.SampleApi.SampleApi
 

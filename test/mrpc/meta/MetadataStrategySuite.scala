@@ -1,5 +1,6 @@
 package mrpc.meta
 
+import made.Made
 import mrpc.derive.SampleApi.*
 
 /**

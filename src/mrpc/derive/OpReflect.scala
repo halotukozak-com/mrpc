@@ -8,7 +8,7 @@ import scala.quoted.*
  * One parameter's label, declared type, and raw per-param `Metadata` — a refined `Param` type,
  * mirroring made's own `InputElem` shape, rather than a value: it never leaves this package other than
  * to feed [[Matcher]]/[[MetadataDerivation]]'s own macro-time classification, so it never needs to
- * exist as a runtime value. Read back via `metadataEntries`/`paramHasVerbatim`, or directly via a
+ * exist as a runtime value. Read back via `metadataEntries`, or directly via a
  * `case '[Param { type ParamType = t }] => ...` quote pattern at the (few) call sites that only need
  * one field once, same as [[OpPlan]] is read back via local quote-pattern matches in [[Matcher]] /
  * [[AsRawDerivation]] / [[AsRealDerivation]].
@@ -33,20 +33,6 @@ private[mrpc] sealed trait Param:
  * metadata materialization — one Done-walk path, no fork.
  */
 private[mrpc] object OpReflect:
-  /**
-   * The op's per-parameter-list arities, read off its `ParamLists` (a tuple of singleton `Int`s).
-   * The client proxy uses these to split a flat encoded-argument list back into the nested
-   * `List[List[Raw]]` shape `RawInvocation` expects (the inverse of the server adapter's `flatten`):
-   *   - `EmptyTuple`            (no-parens `def f` / `val`)  -> `Nil`
-   *   - `0 *: EmptyTuple`       (empty-parens `def f()`)     -> `List(0)`
-   *   - `1 *: 2 *: EmptyTuple`  (`def f(a)(b, c)`)           -> `List(1, 2)`
-   */
-  def paramListSizes(opType: Type[?])(using Quotes): List[Int] =
-    opType match
-      case '[type lists <: Tuple; DoneOperation { type ParamLists = lists }] =>
-        Type.valueOfTuple[lists].get.toList.asInstanceOf[List[Int]]
-      case _ => quotes.reflect.report.errorAndAbort(s"no ParamLists member on ${Type.show(using opType)}")
-
   /** The op's (or param's) `Metadata` tuple entries as types (each an `AnnotatedType(Meta, annot)`). */
   def metadataEntries(t: Type[? <: { type Metadata <: Tuple }])(using Quotes): List[Type[?]] = t match
     case '[type meta <: Tuple; { type Metadata = meta }] => TupleTraverse.traverseTuple[meta, made.Meta]

@@ -1,7 +1,8 @@
 package mrpc.meta
 
+import made.Made
 import mrpc.annotation.{multi, reifyAnnot, reifyName, rpcMethodMetadata, rpcParamMetadata}
-import mrpc.derive.SampleApi.*
+import mrpc.derive.SampleApi.{SampleApi, *}
 
 // Per-param metadata for the migrated v1 suite: source name + the optional @multi annotation a param
 // may carry (SampleApi.increment's `n` is @multi).

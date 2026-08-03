@@ -18,8 +18,10 @@ import scala.quoted.*
  * `Tuple.Map`/match types cannot do. **Annotation-proof** by construction.
  */
 sealed trait RpcNames[T]:
-  type Names <: Tuple
+  type Names <: Tuple /* of String */
   def names: Names
+  
+  given Names containsOnly String = containsOnly.refl
 
 object RpcNames:
   transparent inline given derived[T: Done.Of as done]: RpcNames[T] = ${
