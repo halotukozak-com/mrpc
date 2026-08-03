@@ -1,5 +1,7 @@
 package mrpc.annotation
 
+import made.annotation.MetaAnnotation
+
 import scala.quoted.{Expr, FromExpr, Quotes}
 
 /**
@@ -11,7 +13,7 @@ import scala.quoted.{Expr, FromExpr, Quotes}
  * `made.Done.Metadata`, so this is a plain [[scala.annotation.StaticAnnotation]]. Mirrors commons
  * `infer`.
  */
-final class infer(val clue: String) extends scala.annotation.StaticAnnotation:
+final class infer(val clue: String) extends MetaAnnotation:
   def this() = this("")
 
 private[mrpc] object infer:

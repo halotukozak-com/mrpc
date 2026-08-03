@@ -199,12 +199,12 @@ private def raiseCannotDerivedTypeForImpl[For <: AnyKind: Type, Provided: Type](
   report.error(s"Cannot derive for ${TypeRepr.of[For].show} for ${TypeRepr.of[Provided].show}")
   '{ ??? }
 
-inline private[mrpc] def showTypeRepr[T] = ${ showTypeReprImpl[T] }
+inline private[mrpc] def showTypeRepr[T]: Unit = ${ showTypeReprImpl[T] }
 
-private def showTypeReprImpl[T: Type](using Quotes): Expr[Nothing] =
-  given Position = Position.NoPosition
+private def showTypeReprImpl[T: Type](using Quotes): Expr[Unit] =
   import quotes.reflect.*
-  typeReprInfo(TypeRepr.of[T]).dbg
+  report.info(typeReprInfo(TypeRepr.of[T]))
+  '{ () }
 
 private[mrpc] def wontHappen(using Quotes, Position) =
   s"This code should never be executed".dbg

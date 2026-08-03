@@ -1,5 +1,7 @@
 package mrpc.annotation
 
+import made.annotation.MetaAnnotation
+
 /**
  * Steers a metadata-class constructor parameter to be materialized by RECURSING the
  * metadata-class construction on the parameter's type, against the SAME real-symbol context as the
@@ -10,4 +12,4 @@ package mrpc.annotation
  * `made.Done.Metadata`, so this is a plain [[scala.annotation.StaticAnnotation]]. Mirrors commons
  * `composite`.
  */
-final class composite extends scala.annotation.StaticAnnotation
+final class composite extends MetaAnnotation

@@ -1,5 +1,7 @@
 package mrpc.annotation
 
+import made.annotation.MetaAnnotation
+
 import scala.quoted.{Expr, FromExpr, Quotes}
 
 /**
@@ -13,7 +15,7 @@ import scala.quoted.{Expr, FromExpr, Quotes}
  * `made.Done.Metadata`, so this is a plain [[scala.annotation.StaticAnnotation]] (not a
  * `made.annotation.MetaAnnotation`). Mirrors commons `reifyName`.
  */
-final class reifyName(val useRawName: Boolean) extends scala.annotation.StaticAnnotation:
+final class reifyName(val useRawName: Boolean) extends MetaAnnotation:
   def this() = this(false)
 
 private[mrpc] object reifyName:
@@ -32,4 +34,4 @@ private[mrpc] object reifyName:
  * Read by reflection on the metadata class's constructor params, so this is a plain
  * [[scala.annotation.StaticAnnotation]]. Mirrors commons `reifyAnnot`.
  */
-final class reifyAnnot extends scala.annotation.StaticAnnotation
+final class reifyAnnot extends MetaAnnotation

@@ -2,7 +2,6 @@ package mrpc
 package meta
 
 import made.Made
-import made.Made.Of
 import mrpc.annotation.{composite, multi, reifyName, rpcMethodMetadata}
 import mrpc.derive.SampleApi.SampleApi
 
@@ -28,6 +27,7 @@ object TraitMetaCmp extends RpcMetadataCompanion[TraitMetaCmp]
 
 // META2-02 @composite assertions: recursion against the SAME real symbol context.
 class CompositeMetadataSuite extends munit.FunSuite:
+
 
   private lazy val md: TraitMetaCmp[SampleApi] = TraitMetaCmp.materialize[SampleApi]
   private def method(source: String): MethodMetaCmp[?] =

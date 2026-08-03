@@ -19,7 +19,6 @@ import scala.quoted.*
  */
 sealed trait RpcNames[T]:
   type Names <: Tuple /* of String */
-  def names: Names
   
   given Names containsOnly String = containsOnly.refl
 
@@ -69,11 +68,10 @@ object RpcNames:
     detectDuplicates(labels, resolved)
 
     Expr.ofRefinedTuple(resolved.map(Expr(_))) match
-      case '{ type ns <: Tuple; $namesValue: ns } =>
+      case '{ type ns <: Tuple; $_ : ns } =>
         '{
           (new RpcNames[T]:
             type Names = ns
-            def names: Names = $namesValue
           ): RpcNames[T] { type Names = ns }
         }
 

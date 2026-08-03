@@ -46,8 +46,11 @@ private[mrpc] object MetadataDerivation:
    * The real-symbol context a metadata value is being built against. Determines what `@reifyName`,
    * `@reifyAnnot`, `@rpcMethodMetadata`, and `@rpcParamMetadata` resolve to.
    */
-  sealed trait Context
-  object Context:
+
+  transparent inline private def ctx(using ctx: Context): ctx.type = ctx
+
+  private sealed trait Context
+  private object Context:
     /** The whole real trait: ops + their resolved names, in `Done` order. */
     sealed abstract class Trait extends Context:
       type Ops <: Tuple /* of DoneOperation */
@@ -79,24 +82,24 @@ private[mrpc] object MetadataDerivation:
 
     /** A single RPC parameter (a refined [[Param]] type). */
     sealed abstract class Param extends Context:
-      type P <: mrpc.derive.Param
+      type P <: InputElem
 
       val underlying: P
 
     object Param:
-      def apply(p: mrpc.derive.Param): Param { type P = p.type } = new Param:
+      def apply(p: InputElem): Param { type P = p.type } = new Param:
         override type P = p.type
         override val underlying: p.type = p
 
-  inline def impl[M[_], Real, Operations <: Tuple, Names <: Tuple](
-    inline operations: Operations,
+  inline def impl[M[_], Real, Names <: Tuple](
+    operations: Tuple,
   )(using
-    Operations containsOnly DoneOperation,
+    operations.type containsOnly DoneOperation,
     Names containsOnly String,
   )(using
     made: Made.Of[M[Real]],
   ): M[Real] =
-    inline val ctx = Context.Trait[Names](operations)
+    val ctx = Context.Trait[Names](operations)
     buildValue[M[Real]](using made, ctx)
 
   inline private def buildValue[M: Made.Of as made](using Context): M =
@@ -104,29 +107,45 @@ private[mrpc] object MetadataDerivation:
     val elems = fillAllParams(made.elems).asInstanceOf[p.ElemTypes] // todo: can we avoid this asIsntanceOf?
     p.fromTuple(elems)
 
-  inline private def fillAllParams(inline acc: Tuple)(using Context): Tuple = inline acc match
+  inline private def fillAllParams(acc110: Tuple)(using Context): Tuple = inline acc110 match
     case _: EmptyTuple => EmptyTuple
-    case _: (h *: tail) =>
-      fillParam(acc.head.asInstanceOf[h & MadeElem]) *: fillAllParams(acc.tail) // todo: do it better
+    case _: (head *: tail) =>
+      val head = acc110.head.asInstanceOf[head & MadeElem]
+      val tail = acc110.tail.asInstanceOf[tail]
 
-  inline private def fillParam(e: MadeElem)(using ctx: Context) =
-    import made.{getAnnotation, hasAnnotation}
+      fillParam(head) *: fillAllParams(tail)
 
-    inline val arity = inline if e.hasAnnotation[mrpc.annotation.multi] then SlotArity.Multi
-    else if e.hasAnnotation[mrpc.annotation.optional] then SlotArity.Optional
+  extension (e: MadeElem) transparent inline private def getUserRawName: Boolean = ${ getUserRawNameImpl[e.Metadata] }
+
+  private def getUserRawNameImpl[M <: Tuple: Type](using quotes: Quotes): Expr[Boolean] =
+    import quotes.reflect.*
+
+    def loop[Tup <: Tuple: Type](using Quotes): Expr[Boolean] = Type.of[Tup] match
+      case '[EmptyTuple] =>
+        report.errorAndAbort("@reifyName: no @reifyName annotation found on the metadata param's type chain")
+      case '[t *: ts] =>
+        TypeRepr.of[t] match
+          case AnnotatedType(_, annot) if annot.tpe <:< TypeRepr.of[mrpc.annotation.reifyName] =>
+            annot.asExprOf[mrpc.annotation.reifyName] match
+              case Expr(x) => Expr(x.useRawName)
+
+    loop[M]
+
+  transparent inline private def arity(e: MadeElem): SlotArity =
+    inline if e.hasAnnotation[mrpc.annotation.multi] then SlotArity.Multi
+    else inline if e.hasAnnotation[mrpc.annotation.optional] then SlotArity.Optional
     else SlotArity.Single
 
-    if e.hasAnnotation[mrpc.annotation.composite] then composite[e.Type]
-    else if e.hasAnnotation[mrpc.annotation.reifyName] then
-      val useRaw = e.getAnnotation[mrpc.annotation.reifyName].exists(_.useRawName)
-      reifyName(useRaw)
-    else if e.hasAnnotation[mrpc.annotation.reifyAnnot] then reifyAnnot[e.Type](arity)
-    else if e.hasAnnotation[mrpc.annotation.rpcMethodMetadata] then
+  inline private def fillParam(e: MadeElem)(using Context) =
+    inline if e.hasAnnotation[mrpc.annotation.composite] then composite[e.Type]
+    else inline if e.hasAnnotation[mrpc.annotation.reifyName] then reifyName(e.getUserRawName)
+    else inline if e.hasAnnotation[mrpc.annotation.reifyAnnot] then reifyAnnot[e.Type](arity(e))
+    else inline if e.hasAnnotation[mrpc.annotation.rpcMethodMetadata] then
       inline ctx match
-        case given Context.Trait => rpcMethodMetadata[e.Type, e.Label](arity)
-    else if e.hasAnnotation[mrpc.annotation.rpcParamMetadata] then
+        case ctx: Context.Trait => rpcMethodMetadata[e.Type, e.Label](arity(e))(using ctx)
+    else inline if e.hasAnnotation[mrpc.annotation.rpcParamMetadata] then
       inline ctx match
-        case given Context.Method => rpcParamMetadata[e.Type, e.Label](arity)
+        case ctx: Context.Method => rpcParamMetadata[e.Type, e.Label](arity(e))(using ctx)
     else inline if e.hasAnnotation[mrpc.annotation.infer] then compiletime.summonInline[e.Type]
     //                .getOrElse:
     //                  val clue = Option(annot.clue).filter(_.nonEmpty).map(c => s" ($c)").getOrElse("")
@@ -141,26 +160,33 @@ private[mrpc] object MetadataDerivation:
    * The collection-arity marker on a metadata param. `@multi` -> a collection slot; `@optional` ->
    * an `Option` slot; absent (or `@single`) -> exactly-one. Mirrors commons `single`/`optional`/`multi`.
    */
-  private enum SlotArity:
-    case Single, Optional, Multi
+  private sealed trait SlotArity
+  private object SlotArity:
+    sealed trait Single extends SlotArity
+    object Single extends Single
+    sealed trait Optional extends SlotArity
+    object Optional extends Optional
+    sealed trait Multi extends SlotArity
+    object Multi extends Multi
 
   /**
    * `@composite`: the param's type C is a class with a public primary ctor; recurse `buildValue(C, ctx)`
    * threading the SAME real-symbol context, so C's `@reifyName` reads the enclosing real symbol (the op
    * or param), NOT C's field names (research Pitfall 3). Emits `new C(<filled params>)`.
    */
-  inline private def composite[M](using ctx: Context): M =
+  inline private def composite[M](using Context): M =
     buildValue[M]
 
   /** `@reifyName`: source label or, when `useRaw`, the resolved rpcName for the current context. */
-  inline private def reifyName(inline useRaw: Boolean)(using ctx: Context): String =
-    inline ctx match
-      case ctx: Context.Method =>
-        inline if useRaw then compiletime.constValue[ctx.Name]
-        else compiletime.constValue[ctx.op.Label]
-      case ctx: Context.Param =>
-        compiletime.constValue[ctx.underlying.Label]
-      case ctx: Context.Trait => compiletime.error("@reifyName is not valid at the trait level (no single name)")
+  inline private def reifyName(inline useRaw: Boolean)(using Context): String = inline ctx match
+    case ctx: Context.Method =>
+      inline if useRaw then compiletime.constValue[ctx.Name]
+      else
+        ???
+        // compiletime.constValue[ctx.op.Label]
+    case ctx: Context.Param =>
+      compiletime.constValue[ctx.underlying.Label]
+    case _: Context.Trait => compiletime.error("@reifyName is not valid at the trait level (no single name)")
 
   /**
    * `@reifyAnnot` (arity-sensitive): finds the param's annotation type `A` in the current context's
@@ -172,8 +198,7 @@ private[mrpc] object MetadataDerivation:
    *   - `@multi` / slot `List[A]`      -> ALL matching annotations on the symbol (the mrpc-owned
    *                                      tuple walk: collect every `AnnotatedType(_, a)` with `a.tpe <:< A`).
    */
-  inline private def reifyAnnot[Param](arity: SlotArity)(using ctx: Context): Any =
-
+  inline private def reifyAnnot[Param](arity: SlotArity)(using Context): Any =
     def allTerms[A]: List[A] = inline ctx match
       case ctx: Context.Method => getAllAnnotations(ctx.op)(using containsOnly.refl)[A & Annotation]
       case ctx: Context.Param => getAllAnnotations(ctx.underlying)(using containsOnly.refl)[A & Annotation]
@@ -181,25 +206,25 @@ private[mrpc] object MetadataDerivation:
 
     // Resolve the slot's annotation element type from its declared shape (List[A]/Option[A]/A),
     // cross-checked against the steering arity marker.
-    (arity, compiletime.erasedValue[Param]) match
-      case (SlotArity.Multi, _: List[a]) =>
+    inline (arity, compiletime.erasedValue[Param]) match
+      case (_: SlotArity.Multi, _: List[a]) =>
         // collect-all: every annotation of type A on the symbol.
         allTerms[a]
-      case (SlotArity.Multi, _) =>
+      case (_: SlotArity.Multi, _) =>
         // @multi over a non-List @reifyAnnot slot is the declared annotation type collected directly.
         allTerms[Param]
-      case (SlotArity.Optional, _: Option[a]) =>
+      case (_: SlotArity.Optional, _: Option[a]) =>
         allTerms[a].headOption
       case (_, _: Option[a]) =>
         // a bare Option[A] slot is treated as optional regardless of the marker.
         allTerms[a].headOption
       case (_, _) =>
         // @single (or default): exactly one; abort if absent.
-        allTerms[Param] match
+        inline allTerms[Param] match
           case term :: _ => term
           case Nil =>
             compiletime.error(
-              s"@single @reifyAnnot: no annotation + "
+              "@single @reifyAnnot: no annotation"
               /** ${Type.show[Param]}  * */
               + "present on the RPC element",
             )
@@ -213,20 +238,24 @@ private[mrpc] object MetadataDerivation:
    * Each element recurses `buildValue` in a per-op [[Context.Method]].
    */
 
-  inline private def buildAllElems[e, name <: String](acc: Tuple): Tuple =
-    inline compiletime.erasedValue[acc.type] match
+  inline private def buildAllElems[e, name <: String](acc231: Tuple): Tuple =
+    inline acc231 match
       case _: EmptyTuple => EmptyTuple
-      case _: (DoneOperation.Of[x] *: tail) =>
-        val op = acc.head.asInstanceOf[DoneOperation.Of[x]]
-        buildElem[e, x](using Context.Method[name](op)) *: buildAllElems[e, name](acc.tail) // todo: do it better
+      case _: (head *: tail) =>
+        val head = acc231.head.asInstanceOf[head & DoneOperation]
+        val tail = acc231.tail.asInstanceOf[tail]
 
-  inline private def buildAllElems2[e](acc: Tuple): Tuple = inline compiletime.erasedValue[acc.type] match
+        buildElem[e, head.Type](using Context.Method[name](head)) *: buildAllElems[e, name](tail)
+
+  inline private def buildAllElems2[e](acc238: Tuple): Tuple = inline acc238 match
     case _: EmptyTuple => EmptyTuple
-    case _: (Param.Of[x] *: tail) =>
-      val p = acc.head.asInstanceOf[Param.Of[x]]
-      buildElem[e, x](using Context.Param(p)) *: buildAllElems2(acc.tail)
+    case _: (head *: tail) =>
+      val head = acc238.head.asInstanceOf[head & InputElem]
+      val tail = acc238.tail.asInstanceOf[tail]
 
-  inline def buildElem[elem <: AnyKind, T](using ctx: Context) = ${ buildElemImpl[elem, T]('ctx) }
+      buildElem[e, head.Type](using Context.Param(head)) *: buildAllElems2[e](tail)
+
+  inline private def buildElem[elem <: AnyKind, T](using ctx: Context) = ${ buildElemImpl[elem, T]('ctx) }
 
   private def buildElemImpl[elem <: AnyKind: Type, T: Type](
     ctx: Expr[Context],
@@ -237,21 +266,19 @@ private[mrpc] object MetadataDerivation:
     case '[type e <: Any; e] =>
       '{ buildValue[e](using compiletime.summonInline[Made.Of[e]], $ctx) }
 
-  inline private def rpcMethodMetadata[P, Name <: String](arity: SlotArity)(using ctx: Context.Trait): Any =
-//    val names = compiletime.constValueTuple[ctx.Names]
-    val names: Tuple = ???
+  inline private def rpcMethodMetadata[P, Name <: String](arity: SlotArity)(using Context.Trait): Any =
     inline arity match
-      case SlotArity.Multi =>
+      case _: SlotArity.Multi =>
         inline compiletime.erasedValue[P] match
           case _: Map[String, e] =>
             NamedTuple
-              .build[names.type]()(buildAllElems[e, Name](ctx.operations))
+              .build[ctx.Names]()(buildAllElems[e, Name](ctx.operations))
               .toList
               .asInstanceOf[List[(String, ?)]]
               .toMap
           case _: List[e] =>
             buildAllElems[e, Name](ctx.operations).toList
-      case SlotArity.Optional =>
+      case _: SlotArity.Optional =>
         inline compiletime.erasedValue[P] match
           case _: Option[e] =>
             inline ctx.operations match
@@ -262,9 +289,9 @@ private[mrpc] object MetadataDerivation:
                   "@rpcMethodMetadat @optional slot '" + compiletime.constValue[Name] + "' matched " +
                     ctx.operations.size + " elements; expected 0 or 1",
                 )
-      case SlotArity.Single =>
+      case _: SlotArity.Single =>
         inline ctx.operations match
-          case (it: DoneOperation) :: Nil => buildElem[P, it.Type]
+          case (it: DoneOperation) *: EmptyTuple => buildElem[P, it.Type]
           case other =>
             compiletime.error(
               "@rpcMethodMetadata @single slot '" + compiletime.constValue[Name] +
@@ -275,37 +302,35 @@ private[mrpc] object MetadataDerivation:
    * `@rpcParamMetadata`: projects over the op's `inputElems` (declaration order). Same arity shaping as
    * [[rpcMethodMetadata]]; `Map` slots are keyed by paramName.
    */
-  inline private def rpcParamMetadata[P, Name <: String](arity: SlotArity)(using ctx: Context.Method): P =
-//    val names = compiletime.constValueTuple[Tuple.Map[ctx.op.InputElems, InputElem.ExtractLabel]]
-    val names: Tuple = ???
-    (inline arity match
-      case SlotArity.Multi =>
+  inline private def rpcParamMetadata[P, Name <: String](arity: SlotArity)(using Context.Method): P =
+    inline arity match
+      case _: SlotArity.Multi =>
         inline compiletime.erasedValue[P] match
           case _: Map[String, e] =>
             NamedTuple
-              .build[names.type]()(buildAllElems2[e](ctx.op.inputElems))
+              .build[Tuple.Map[ctx.op.InputElems, InputElem.ExtractLabel]]()(buildAllElems2[e](ctx.op.inputElems))
               .toList
               .asInstanceOf[List[(String, ?)]]
               .toMap
+              .asInstanceOf[P]
           case _: List[e] =>
-            buildAllElems2[e](ctx.op.inputElems).toList
-      case SlotArity.Optional =>
+            buildAllElems2[e](ctx.op.inputElems).toList.asInstanceOf[P]
+      case _: SlotArity.Optional =>
         inline compiletime.erasedValue[P] match
           case _: Option[e] =>
             inline ctx.op.inputElems match
-              case _: EmptyTuple => None
-              case (it: Param) :: Nil => Some(buildElem[e, it.ParamType](using Context.Param(it)))
+              case _: EmptyTuple => None.asInstanceOf[P]
+              case (it: InputElem) *: EmptyTuple => Some(buildElem[e, it.Type](using Context.Param(it))).asInstanceOf[P]
               case _ =>
                 compiletime.error(
                   "@rpcParamMetadata @optional slot '" + compiletime.constValue[Name] + "' matched " +
                     ctx.op.inputElems.size + " elements; expected 0 or 1",
                 )
-      case SlotArity.Single =>
+      case _: SlotArity.Single =>
         inline ctx.op.inputElems match
-          case (it: Param) :: Nil => buildElem[P, it.ParamType](using Context.Param(it))
+          case (it: InputElem) *: EmptyTuple => buildElem[P, it.Type](using Context.Param(it)).asInstanceOf[P]
           case other =>
             compiletime.error(
               "@rpcParamMetadata @single slot '" + compiletime.constValue[Name] + "' requires exactly one match; got " +
                 other.size,
             )
-    ).asInstanceOf[P]

@@ -13,7 +13,7 @@ import scala.quoted.*
  * one field once, same as [[OpPlan]] is read back via local quote-pattern matches in [[Matcher]] /
  * [[AsRawDerivation]] / [[AsRealDerivation]].
  */
-private[mrpc] sealed trait Param:
+private[mrpc] trait Param:
   type Label <: String
   type ParamType
   type Metadata <: Tuple
