@@ -1,6 +1,6 @@
 package mrpc.derive
 
-import made.{Done, DoneOperation, InputElem, Meta}
+import made.{containsOnly, Done, DoneOperation, InputElem, Meta}
 
 import scala.concurrent.Future
 import scala.quoted.{Expr, Quotes, Type}
@@ -151,6 +151,7 @@ object OpPlan:
  */
 sealed trait Plans[T]:
   type Underlying <: Tuple
+  given Underlying containsOnly OpPlan = containsOnly.refl
 
 object Plans:
   transparent inline given [T: {Done.Of as done, RpcNames as names}] => Plans[T] = ${ derive[T, names.Names, done.Operations]('done) }

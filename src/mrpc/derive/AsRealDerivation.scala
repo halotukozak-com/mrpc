@@ -4,7 +4,6 @@ import made.*
 import mrpc.conv.AsReal
 import mrpc.raw.RawRpc
 
-import scala.annotation.unused
 import scala.concurrent.ExecutionContext
 
 /**
@@ -30,29 +29,11 @@ object AsRealDerivation:
    * per-`raw` proxy body is generated. `ExecutionContext` is in scope so the `call` arity can compose
    * `AsReal[Future[Raw], Future[r]]` via `forFuture`.
    */
-  inline def impl[Raw, Real: Done.Of](using ExecutionContext): AsReal[RawRpc[Raw], Real] =
-    raw =>
-      given RawRpc[Raw] = raw
-      materializeProxy[Raw, Real]
+  inline def impl[Raw, Real: {Done.Of as done, Plans as plans}](using ExecutionContext): AsReal[RawRpc[Raw], Real] =
+    implicit raw => buildAllHandlers[Raw, plans.Underlying].to[Real](using done)(using ValidHandlers.refl)
 
-  /**
-   * Builds the `Real` client proxy for a single `RawRpc[Raw]`. Deliberately NOT itself a macro (no
-   * top-level `${...}` here): `.to[Real]` is made's OWN macro (`transparent inline def to[Target:
-   * Done.Of as done](using ValidHandlers[done.Operations, Handlers])`), and calling it from INSIDE
-   * another macro's generated tree (rather than from plain inline-def source, as here) reintroduces
-   * the well-known `done$proxyN` inliner-proxy mismatch — two different views of the same
-   * context-bound `done` disagreeing on `Operations`'s precise type. Only the handler TUPLE itself
-   * (whose per-op shape genuinely needs macro-level access to [[Plans]]) is built by [[buildHandlers]].
-   */
-  inline def materializeProxy[Raw: RawRpc, Real: {Done.Of as done, Plans as plans}](using ExecutionContext): Real =
-    buildHandlers[Raw, Real](plans).to[Real](using done)(using ValidHandlers.refl)
-
-  /**
-   * Macro entry: reads every classified [[OpPlan]] off `Plans[Real].All` (via [[Plans.allOf]] — the
-   * one macro-level access point, same as [[Matcher]] uses) and summons ONE `Handler[Raw, op]` per
-   * position, assembled into the tuple made's `.to[Real]` expects.
-   */
-  inline private def buildHandlers[Raw: RawRpc as raw, Real](plans: Plans[Real])(using ec: ExecutionContext): Tuple =
-    @unused given RawRpc[Raw] = raw
-    @unused given ExecutionContext = ec
-    compiletime.summonAll[Tuple.Map[plans.Underlying, [O] =>> Handler[Raw, O & OpPlan]]]
+  inline private def buildAllHandlers[Raw: RawRpc, Plans <: Tuple](using Plans containsOnly OpPlan, ExecutionContext)
+    : Tuple = inline compiletime.erasedValue[Plans] match
+    case _: EmptyTuple => EmptyTuple
+    case _: (head *: tail) =>
+      Handler.materialize[Raw, head & OpPlan] *: buildAllHandlers[Raw, tail & Tuple.Tail[Plans]]

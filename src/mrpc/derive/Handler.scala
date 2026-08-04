@@ -36,7 +36,7 @@ object Handler:
    * guess), while an explicit direct reference resolves it correctly; only the `Raw: RawRpc` context
    * bound still needs — and gets — ordinary implicit resolution at the (direct) call site.
    */
-  inline given derived: [Raw: RawRpc, Plan <: OpPlan] => ExecutionContext => Handler[Raw, Plan] =
+  inline def materialize[Raw: RawRpc, Plan <: OpPlan](using ExecutionContext): Handler[Raw, Plan] =
     inline compiletime.erasedValue[Plan] match
       case plan =>
         inline compiletime.erasedValue[plan.OpType] match
