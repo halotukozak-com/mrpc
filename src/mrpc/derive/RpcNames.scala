@@ -18,9 +18,8 @@ import scala.quoted.*
  * `Tuple.Map`/match types cannot do. **Annotation-proof** by construction.
  */
 sealed trait RpcNames[T]:
-  type Names <: Tuple /* of String */
-  
-  given Names containsOnly String = containsOnly.refl
+  type Underlying <: Tuple
+  given Underlying containsOnly String = containsOnly.refl
 
 object RpcNames:
   transparent inline given derived[T: Done.Of as done]: RpcNames[T] = ${
@@ -60,8 +59,8 @@ object RpcNames:
       case '{ type ns <: Tuple; $_ : ns } =>
         '{
           (new RpcNames[T]:
-            type Names = ns
-          ): RpcNames[T] { type Names = ns }
+            type Underlying = ns
+          ): RpcNames[T] { type Underlying = ns }
         }
 
   /** Applies `@rpcNamePrefix` per its `overloadedOnly` flag. */

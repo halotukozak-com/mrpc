@@ -157,7 +157,7 @@ sealed trait Plans[T]:
 
 object Plans:
   transparent inline def materialize[T: {Done.Of as done, RpcNames as names}]: Plans[T] =
-    ${ derive[T, names.Names, done.Operations]('done) }
+    ${ derive[T, names.Underlying, done.Operations]('done) }
 
   /**
    * Builds `Plans[T]`'s `All` from [[OpPlan.classify]], one op at a time (in `Done.Operations` order) —

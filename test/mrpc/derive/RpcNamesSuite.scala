@@ -12,7 +12,7 @@ class RpcNamesSuite extends munit.FunSuite:
 
   test("RpcNames.Names resolves all rpcNames over an annotated trait"):
     val rn = summon[RpcNames[SampleApi]]
-    val resolved: List[String] = compiletime.constValueTuple[rn.Names].toList.map(_.toString)
+    val resolved: List[String] = compiletime.constValueTuple[rn.Underlying].toList.map(_.toString)
     assertEquals(resolved.size, 9)
     // every op except the overloaded `lookup` pair resolves to its plain (unsuffixed) name
     val plain = Set("ping", "increment", "find", "users", "combine", "echoBool", "findOne")
