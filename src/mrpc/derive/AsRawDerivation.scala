@@ -28,8 +28,8 @@ object AsRawDerivation:
    * by [[buildRawRpc]]. The `AsRaw` wrapper is ordinary Scala (a SAM lambda); only the `RawRpc` itself
    * — its arity-partitioned `fire`/`call`/`get` dispatch — is generated.
    */
-  inline def impl[Raw, Real: Done.Of](using ExecutionContext): AsRaw[RawRpc[Raw], Real] =
-    (api: Real) => buildRawRpc[Raw, Real](api)
+  inline def impl[Raw, Real: Done.Of](plans: Plans[Real])(using ExecutionContext): AsRaw[RawRpc[Raw], Real] =
+    (api: Real) => buildRawRpc[Raw, Real](api)(plans)
 
   /**
    * Macro entry: assembles the dispatching `RawRpc[Raw]` for a `Real` instance. `Done.Of[Real]` and
@@ -37,7 +37,7 @@ object AsRawDerivation:
    * `fire`/`call`/`get` bodies below — unlike three independent macro entries, which would each
    * re-derive them.
    */
-  inline def buildRawRpc[Raw, Real: {Done.Of as done, Plans as plans}](api: Real)(using ec: ExecutionContext)
+  inline private def buildRawRpc[Raw, Real: {Done.Of as done}](api: Real)(plans: Plans[Real])(using ec: ExecutionContext)
     : RawRpc[Raw] =
     ${ buildRawRpcImpl[Raw, Real, plans.Underlying]('api, 'done, 'ec) }
 

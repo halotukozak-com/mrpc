@@ -29,7 +29,7 @@ object AsRealDerivation:
    * per-`raw` proxy body is generated. `ExecutionContext` is in scope so the `call` arity can compose
    * `AsReal[Future[Raw], Future[r]]` via `forFuture`.
    */
-  inline def impl[Raw, Real: {Done.Of as done, Plans as plans}](using ExecutionContext): AsReal[RawRpc[Raw], Real] =
+  inline def impl[Raw, Real: {Done.Of as done}](plans: Plans[Real])(using ExecutionContext): AsReal[RawRpc[Raw], Real] =
     implicit raw => buildAllHandlers[Raw, plans.Underlying].to[Real](using done)(using ValidHandlers.refl)
 
   inline private def buildAllHandlers[Raw: RawRpc, Plans <: Tuple](using Plans containsOnly OpPlan, ExecutionContext)

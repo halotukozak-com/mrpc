@@ -1,6 +1,6 @@
 package mrpc.derive
 
-import made.{containsOnly, Done, DoneOperation, InputElem, Meta}
+import made.*
 
 import scala.concurrent.Future
 import scala.quoted.{Expr, Quotes, Type}
@@ -58,7 +58,7 @@ private[derive] sealed trait OpPlan:
   type ResultEncoding <: EncodingTag
   type OpType <: DoneOperation
 
-  final type Args  = Tuple.Map[
+  final type Args = Tuple.Map[
     Params,
     [X] =>> X match
       case ([p0] =>> ParamPlan { type ParamType = p0 })[p] => p,
@@ -66,7 +66,8 @@ private[derive] sealed trait OpPlan:
 
 object OpPlan:
 
-  /** [[OpPlan.Args]], off a still-abstract `Op <: OpPlan` — `Op#Args` (general type projection on a
+  /**
+   * [[OpPlan.Args]], off a still-abstract `Op <: OpPlan` — `Op#Args` (general type projection on a
    * non-singleton prefix) is disallowed, and `Args` itself is a concrete alias (not a bare abstract
    * member), so a match type can't refine it directly either; this recomputes it from `Params` (which
    * IS abstract) via the same type-lambda-application idiom [[RpcNames]]/[[Matcher]] use to extract a
@@ -81,7 +82,8 @@ object OpPlan:
           case ([p0] =>> ParamPlan { type ParamType = p0 })[p] => p,
       ]
 
-  /** Classifies a single operation (its resolved rpcName + its `DoneOperation` type) into a fully
+  /**
+   * Classifies a single operation (its resolved rpcName + its `DoneOperation` type) into a fully
    * refined [[OpPlan]] type: arity (from `OutputType`), a per-parameter encode-vs-verbatim plan, and
    * the underlying `OpType`/`RpcName`. The ONLY place classification happens — [[Plans]] (which collects
    * one per `T`, once) is its only caller; [[Matcher]] and every other consumer read already-classified
@@ -154,7 +156,8 @@ sealed trait Plans[T]:
   given Underlying containsOnly OpPlan = containsOnly.refl
 
 object Plans:
-  transparent inline given [T: {Done.Of as done, RpcNames as names}] => Plans[T] = ${ derive[T, names.Names, done.Operations]('done) }
+  transparent inline def materialize[T: {Done.Of as done, RpcNames as names}]: Plans[T] =
+    ${ derive[T, names.Names, done.Operations]('done) }
 
   /**
    * Builds `Plans[T]`'s `All` from [[OpPlan.classify]], one op at a time (in `Done.Operations` order) —
@@ -162,7 +165,8 @@ object Plans:
    * (see its doc) only exists at this macro level; folding `Type[? <: OpPlan]`s with
    * [[TupleTraverse.foldTuple]] is what actually carries it into `All`.
    */
-  private def derive[T: Type, Names <: Tuple: Type, Operations <: Tuple: Type](done: Expr[Done.Of[T]])(using Quotes): Expr[Plans[T]] =
+  private def derive[T: Type, Names <: Tuple: Type, Operations <: Tuple: Type](done: Expr[Done.Of[T]])(using Quotes)
+    : Expr[Plans[T]] =
     val ops = TupleTraverse.traverseTuple[Operations, DoneOperation]
     val resolvedNames = TupleTraverse.traverseTuple[Names, String]
     val opPlanTypes = ops.zip(resolvedNames).map((op, name) => OpPlan.classify(op, name))
