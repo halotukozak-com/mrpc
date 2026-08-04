@@ -113,7 +113,7 @@ object AsRawDerivation:
 
     val values =
       Expr.ofRefinedTuple(plans.indices.toList.map { index =>
-        fireByIndex.getOrElse(index, '{ () => () })
+        fireByIndex.getOrElse(index, '{ () => ${ reject(inv) } })
       })
 
     values match
@@ -123,7 +123,7 @@ object AsRawDerivation:
             matchFromImpl[Names, values](
               '{ ${ inv }.rpcName },
               '{ NamedTuple.build[Names]()($values) },
-              '{ () => () }.asExprOf[Tuple.Union[values]],
+              reject(inv),
             ).asExprOf[() => Unit]
           }()
         }
@@ -244,5 +244,5 @@ object AsRawDerivation:
     '{ $res.asInstanceOf[R] }
 
   private def reject(inv: Expr[RawInvocation[?]])(using Quotes) = '{
-    throw new IllegalArgumentException("unknown rpc name for get: " + $inv.rpcName)
+    throw new IllegalArgumentException("unknown rpc name: " + $inv.rpcName)
   }

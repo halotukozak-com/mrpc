@@ -72,3 +72,7 @@ class DispatchSafetySuite extends munit.FunSuite:
   test("an unknown rpc name is rejected, not silently accepted"):
     intercept[IllegalArgumentException]:
       await(rawRpc.call(RawInvocation("doesNotExist", Nil)))
+
+  test("an unknown rpc name on fire is rejected too, not a silent no-op"):
+    intercept[IllegalArgumentException]:
+      rawRpc.fire(RawInvocation("doesNotExist", Nil))
