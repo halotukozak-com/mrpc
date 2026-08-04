@@ -1,15 +1,14 @@
 package mrpc
 package derive
 
-import scala.concurrent.duration.Duration
-import scala.concurrent.{Await, ExecutionContext, Future}
-
-import org.scalacheck.{Arbitrary, Gen}
-import org.scalacheck.Prop.forAll
-
 import mrpc.conv.{AsRaw, AsReal}
 import mrpc.derive.SampleApi.*
 import mrpc.raw.RawRpc
+import org.scalacheck.{Arbitrary, Gen}
+import org.scalacheck.Prop.forAll
+
+import scala.concurrent.{Await, ExecutionContext, Future}
+import scala.concurrent.duration.Duration
 
 /**
  * The round-trip LAW over the full materialized stack: where `LoopbackSuite` pins specific values, this
@@ -51,7 +50,7 @@ class RoundTripLawProps extends munit.ScalaCheckSuite:
   private given AsReal[RawRpc[String], UsersRpc] = SampleApiCodec.materializeAsReal[UsersRpc]
 
   // real -> raw -> real: the full materialized stack the law runs every generated input through.
-  private val rawRpc: RawRpc[String] = SampleApiCodec.materializeAsRaw[SampleApi].asRaw(impl)
+  private val rawRpc: RawRpc[String] = {SampleApiCodec.materializeAsRaw[SampleApi]}.asRaw(impl)
   private val proxy: SampleApi = SampleApiCodec.materializeAsReal[SampleApi].asReal(rawRpc)
 
   private def await[A](f: Future[A]): A = Await.result(f, Duration.Inf)

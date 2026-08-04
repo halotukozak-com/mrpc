@@ -71,20 +71,17 @@ object AsRawDerivation:
   // --- arity-partitioned dispatch bodies ---
 
   transparent inline private def fireArms[Raw, Real: Done.Of, Acc <: Tuple](
-    index: Int,
-  )(
     api: Real,
-    reject: RawInvocation[Raw] => Nothing,
-  ): Tuple = inline compiletime.erasedValue[Acc] match
-    case _: EmptyTuple => EmptyTuple
-    case _: (h *: t) =>
-      val arm = inline compiletime.erasedValue[h] match
-        case op: OpPlan =>
-          inline compiletime.erasedValue[op.ArityInfo] match
-            case _: ArityTag.Fire =>
-              (inv: RawInvocation[Raw]) => invoke[Raw, Real, Any, h & OpPlan](api, inv, index): Unit
-            case _ => (inv: RawInvocation[Raw]) => reject(inv)
-      fireArms[Raw, Real, t](index + 1)(api, reject).realCons(arm)
+  ): Tuple = arms[Raw, Real, Acc, [X] =>> Unit](
+    [A <: ArityTag, Op <: OpPlan] =>
+      index =>
+        inline compiletime.erasedValue[A] match
+          case _: ArityTag.Fire =>
+            (inv: RawInvocation[Raw]) => invoke[Raw, Real, Any, Op](api, inv, index): Unit
+          case _ => (inv: RawInvocation[Raw]) => reject(inv)
+    ,
+    api,
+  )(0)
 
   /**
    * Each body builds `values` over EVERY entry of `plans` (not just its own arity), positionally
@@ -104,30 +101,41 @@ object AsRawDerivation:
     api: Real,
   )(
     inv: RawInvocation[Raw],
-  ): Unit = matchFrom(NamedTuple.build[Names]()(fireArms[Raw, Real, Plans](0)(api, reject)))[RawInvocation[Raw] => Unit](
+  ): Unit = matchFrom(NamedTuple.build[Names]()(fireArms[Raw, Real, Plans](api)))[RawInvocation[Raw] => Unit](
     inv.rpcName,
     reject,
   )(inv)
 
-  transparent inline private def callArms[Raw, Real: Done.Of, Acc <: Tuple](
-    index: Int,
-  )(
+  transparent inline private def arms[Raw, Real: Done.Of, Acc <: Tuple, F[_ <: Raw]](
+    inline f: [A <: ArityTag, Op <: OpPlan] => Int => RawInvocation[Raw] => F[Raw],
     api: Real,
-    reject: RawInvocation[Raw] => Nothing,
-  )(using ec: ExecutionContext,
+  )(
+    index: Int,
   ): Tuple =
     inline compiletime.erasedValue[Acc] match
       case _: EmptyTuple => EmptyTuple
       case _: (h *: t) =>
         val arm = inline compiletime.erasedValue[h] match
           case op: OpPlan =>
-            inline compiletime.erasedValue[op.ArityInfo] match
-              case _: ArityTag.Call[r] =>
-                (inv: RawInvocation[Raw]) =>
-                  val futureEncoder = AsRaw.forFuture[Raw, r](using scala.compiletime.summonInline[AsRaw[Raw, r]], ec)
-                  futureEncoder.asRaw(invoke[Raw, Real, Future[r], h & OpPlan](api, inv, index))
-              case _ => (inv: RawInvocation[Raw]) => reject(inv)
-        callArms[Raw, Real, t](index + 1)(api, reject).realCons(arm)
+            f[op.ArityInfo, op.type](index)
+        arms[Raw, Real, t, F](f, api)(index + 1).realCons(arm)
+
+  transparent inline private def callArms[Raw, Real: Done.Of, Acc <: Tuple](
+    api: Real,
+  )(using ec: ExecutionContext,
+  ): Tuple =
+    arms[Raw, Real, Acc, Future](
+      [A <: ArityTag, Op <: OpPlan] =>
+        index =>
+          inline compiletime.erasedValue[A] match
+            case _: ArityTag.Call[r] =>
+              (inv: RawInvocation[Raw]) =>
+                val futureEncoder = AsRaw.forFuture[Raw, r](using scala.compiletime.summonInline[AsRaw[Raw, r]], ec)
+                futureEncoder.asRaw(invoke[Raw, Real, Future[r], Op](api, inv, index))
+            case _ => (inv: RawInvocation[Raw]) => reject(inv)
+      ,
+      api,
+    )(0)
 
   inline private def callBody[Raw, Real: Done.Of, Plans <: Tuple, Names <: Tuple](
     api: Real,
@@ -135,28 +143,25 @@ object AsRawDerivation:
     inv: RawInvocation[Raw],
   )(using ExecutionContext,
   ): Future[Raw] = matchFrom(
-    NamedTuple.build[Names]()(callArms[Raw, Real, Plans](0)(api, reject)),
+    NamedTuple.build[Names]()(callArms[Raw, Real, Plans](api)),
   )[RawInvocation[Raw] => Future[Raw]](inv.rpcName, reject)(inv)
 
   transparent inline private def bodyArms[Raw, Real: Done.Of, Acc <: Tuple](
-    index: Int,
-  )(
     api: Real,
-    reject: RawInvocation[Raw] => Nothing,
   ): Tuple =
-    inline compiletime.erasedValue[Acc] match
-      case _: EmptyTuple => EmptyTuple
-      case _: (h *: t) =>
-        val arm = inline compiletime.erasedValue[h] match
-          case op: OpPlan =>
-            inline compiletime.erasedValue[op.ArityInfo] match
-              case _: ArityTag.Get[sub] =>
-                (inv: RawInvocation[Raw]) =>
-                  AsRaw
-                    .makeLazy[RawRpc[Raw], sub](compiletime.summonInline[AsRaw[RawRpc[Raw], sub]])
-                    .asRaw(invoke[Raw, Real, sub, h & OpPlan](api, inv, index))
-              case _ => (inv: RawInvocation[Raw]) => reject(inv)
-        bodyArms[Raw, Real, t](index + 1)(api, reject).realCons(arm)
+    arms[Raw, Real, Acc, RawRpc](
+      [A <: ArityTag, Op <: OpPlan] =>
+        index =>
+          inline compiletime.erasedValue[A] match
+            case _: ArityTag.Get[sub] =>
+              (inv: RawInvocation[Raw]) =>
+                AsRaw
+                  .makeLazy[RawRpc[Raw], sub](compiletime.summonInline[AsRaw[RawRpc[Raw], sub]])
+                  .asRaw(invoke[Raw, Real, sub, Op](api, inv, index))
+            case _ => (inv: RawInvocation[Raw]) => reject(inv)
+      ,
+      api,
+    )(0)
 
   inline private def getBody[Raw, Real: Done.Of, Plans <: Tuple, Names <: Tuple](
     api: Real,
@@ -164,7 +169,7 @@ object AsRawDerivation:
     inv: RawInvocation[Raw],
   ): RawRpc[Raw] =
     matchFrom(
-      NamedTuple.build[Names]()(bodyArms[Raw, Real, Plans](0)(api, reject)),
+      NamedTuple.build[Names]()(bodyArms[Raw, Real, Plans](api)),
     )[RawInvocation[Raw] => RawRpc[Raw]](inv.rpcName, reject)(inv)
 
   // --- shared helpers ---
