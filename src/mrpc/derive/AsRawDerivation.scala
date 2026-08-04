@@ -44,7 +44,16 @@ object AsRawDerivation:
   )(using Plans containsOnly OpPlan,
   )(using ec: ExecutionContext,
   ): RawRpc[Raw] =
-    ${ buildRawRpcImpl[Raw, Real, Plans]('api, 'done, 'ec) }
+    type Names = Tuple.Map[
+      Plans,
+      [op] =>> op match
+        case ([n] =>> OpPlan { type RpcName = n })[name] => name,
+    ]
+    mkRawRpc[Raw](
+      fireBody[Raw, Real, Plans, Names](api),
+      callBody[Raw, Real, Plans, Names](api),
+      getBody[Raw, Real, Plans, Names](api),
+    )
 
   /**
    * `mkRawRpc` is an ordinary, non-`inline` method — an anonymous class defined directly inside an
@@ -54,37 +63,28 @@ object AsRawDerivation:
     fireFn: RawInvocation[Raw] => Unit,
     callFn: RawInvocation[Raw] => Future[Raw],
     getFn: RawInvocation[Raw] => RawRpc[Raw],
-  ): RawRpc[Raw] =
-    new RawRpc[Raw]:
-      def fire(invocation: RawInvocation[Raw]): Unit = fireFn(invocation)
-      def call(invocation: RawInvocation[Raw]): Future[Raw] = callFn(invocation)
-      def get(invocation: RawInvocation[Raw]): RawRpc[Raw] = getFn(invocation)
-
-  /**
-   * The `Names` shared across all three bodies below: every op's resolved `RpcName`, in `Plans`
-   * order — computed ONCE here so `fire`/`call`/`get` all dispatch off the exact same tuple of
-   * literal name types, rather than each re-deriving (and potentially mis-filtering) its own.
-   */
-  private def buildRawRpcImpl[Raw: Type, Real: Type, Plans <: Tuple: Type](
-    api: Expr[Real],
-    done: Expr[Done.Of[Real]],
-    ec: Expr[ExecutionContext],
-  )(using Quotes,
-  ): Expr[RawRpc[Raw]] =
-    type Names = Tuple.Map[
-      Plans,
-      [op] =>> op match
-        case ([n] =>> OpPlan { type RpcName = n })[name] => name,
-    ]
-    '{
-      mkRawRpc[Raw](
-        (invocation: RawInvocation[Raw]) => ${ fireBody[Raw, Real, Plans, Names](api, 'invocation, done) },
-        (invocation: RawInvocation[Raw]) => ${ callBody[Raw, Real, Plans, Names](api, 'invocation, ec, done) },
-        (invocation: RawInvocation[Raw]) => getBody[Raw, Real, Plans, Names]($api, invocation)(using $done),
-      )
-    }
+  ): RawRpc[Raw] = new:
+    def fire(invocation: RawInvocation[Raw]): Unit = fireFn(invocation)
+    def call(invocation: RawInvocation[Raw]): Future[Raw] = callFn(invocation)
+    def get(invocation: RawInvocation[Raw]): RawRpc[Raw] = getFn(invocation)
 
   // --- arity-partitioned dispatch bodies ---
+
+  transparent inline private def fireArms[Raw, Real: Done.Of, Acc <: Tuple](
+    index: Int,
+  )(
+    api: Real,
+    reject: RawInvocation[Raw] => Nothing,
+  ): Tuple = inline compiletime.erasedValue[Acc] match
+    case _: EmptyTuple => EmptyTuple
+    case _: (h *: t) =>
+      val arm = inline compiletime.erasedValue[h] match
+        case op: OpPlan =>
+          inline compiletime.erasedValue[op.ArityInfo] match
+            case _: ArityTag.Fire =>
+              (inv: RawInvocation[Raw]) => invoke[Raw, Real, Any, h & OpPlan](api, inv, index): Unit
+            case _ => (inv: RawInvocation[Raw]) => reject(inv)
+      fireArms[Raw, Real, t](index + 1)(api, reject).realCons(arm)
 
   /**
    * Each body builds `values` over EVERY entry of `plans` (not just its own arity), positionally
@@ -100,71 +100,43 @@ object AsRawDerivation:
    * single dispatch, not just the one op whose name matched. Thunking defers all of that to the
    * final `()` below, which only ever runs the ONE arm `matchFromImpl` actually selected.
    */
-  private def fireBody[Raw: Type, Real: Type, Plans <: Tuple: Type, Names <: Tuple: Type](
-    api: Expr[Real],
-    inv: Expr[RawInvocation[Raw]],
-    done: Expr[Done.Of[Real]],
-  )(using Quotes,
-  ): Expr[Unit] =
-    // Walks `Plans` directly via quote-pattern recursion — `h` is bound fresh at each step (with its
-    // OWN precise refined type, `Type[h]` given automatically by the pattern) rather than first
-    // collected into a `List[Type[? <: OpPlan]]` and re-matched afterward, so it never widens to an
-    // unnamed wildcard and never needs an `op.Underlying`-style workaround to recover it.
-    def arms[Tup <: Tuple: Type](index: Int): List[Expr[() => Unit]] = Type.of[Tup] match
-      case '[EmptyTuple] => Nil
-      case '[type h <: OpPlan; h *: t] =>
-        val arm = Type.of[h] match
-          case '[OpPlan { type ArityInfo = ArityTag.Fire }] =>
-            '{ () => ${ invokeImpl[Raw, Real, Any, h](api, inv, Expr(index), done) }: Unit }
-          case _ => '{ () => ${ rejectImpl(inv) } }
-        arm :: arms[t](index + 1)
+  inline private def fireBody[Raw, Real, Plans <: Tuple, Names <: Tuple](
+    api: Real,
+  )(
+    inv: RawInvocation[Raw],
+  ): Unit = matchFrom(NamedTuple.build[Names]()(fireArms[Raw, Real, Plans](0)(api, reject)))[RawInvocation[Raw] => Unit](
+    inv.rpcName,
+    reject,
+  )(inv)
 
-    val values = Expr.ofRefinedTuple(arms[Plans](0))
+  transparent inline private def callArms[Raw, Real: Done.Of, Acc <: Tuple](
+    index: Int,
+  )(
+    api: Real,
+    reject: RawInvocation[Raw] => Nothing,
+  )(using ec: ExecutionContext,
+  ): Tuple =
+    inline compiletime.erasedValue[Acc] match
+      case _: EmptyTuple => EmptyTuple
+      case _: (h *: t) =>
+        val arm = inline compiletime.erasedValue[h] match
+          case op: OpPlan =>
+            inline compiletime.erasedValue[op.ArityInfo] match
+              case _: ArityTag.Call[r] =>
+                (inv: RawInvocation[Raw]) =>
+                  val futureEncoder = AsRaw.forFuture[Raw, r](using scala.compiletime.summonInline[AsRaw[Raw, r]], ec)
+                  futureEncoder.asRaw(invoke[Raw, Real, Future[r], h & OpPlan](api, inv, index))
+              case _ => (inv: RawInvocation[Raw]) => reject(inv)
+        callArms[Raw, Real, t](index + 1)(api, reject).realCons(arm)
 
-    values match
-      case '{ type values <: Tuple; $values: values } =>
-        '{
-          ${
-            matchFromImpl[Names, values, () => Unit](
-              '{ ${ inv }.rpcName },
-              '{ NamedTuple.build[Names]()($values) },
-              rejectImpl(inv),
-            )
-          }()
-        }
-
-  private def callBody[Raw: Type, Real: Type, Plans <: Tuple: Type, Names <: Tuple: Type](
-    api: Expr[Real],
-    inv: Expr[RawInvocation[Raw]],
-    ec: Expr[ExecutionContext],
-    done: Expr[Done.Of[Real]],
-  )(using Quotes,
-  ): Expr[Future[Raw]] =
-    def arms[Tup <: Tuple: Type](index: Int): List[Expr[() => Future[Raw]]] = Type.of[Tup] match
-      case '[EmptyTuple] => Nil
-      case '[type h <: OpPlan; h *: t] =>
-        val arm = Type.of[h] match
-          case '[OpPlan { type ArityInfo = ArityTag.Call[r] }] =>
-            '{ () =>
-              val futureEncoder = AsRaw.forFuture[Raw, r](using scala.compiletime.summonInline[AsRaw[Raw, r]], $ec)
-              futureEncoder.asRaw(${ invokeImpl[Raw, Real, Future[r], h](api, inv, Expr(index), done) })
-            }
-          case _ => '{ () => ${ rejectImpl(inv) } }
-        arm :: arms[t](index + 1)
-
-    val values = Expr.ofRefinedTuple(arms[Plans](0))
-
-    values match
-      case '{ type values <: Tuple; $values: values } =>
-        '{
-          ${
-            matchFromImpl[Names, values, () => Future[Raw]](
-              '{ ${ inv }.rpcName },
-              '{ NamedTuple.build[Names]()($values) },
-              rejectImpl(inv),
-            )
-          }()
-        }
+  inline private def callBody[Raw, Real: Done.Of, Plans <: Tuple, Names <: Tuple](
+    api: Real,
+  )(
+    inv: RawInvocation[Raw],
+  )(using ExecutionContext,
+  ): Future[Raw] = matchFrom(
+    NamedTuple.build[Names]()(callArms[Raw, Real, Plans](0)(api, reject)),
+  )[RawInvocation[Raw] => Future[Raw]](inv.rpcName, reject)(inv)
 
   transparent inline private def bodyArms[Raw, Real: Done.Of, Acc <: Tuple](
     index: Int,
@@ -188,6 +160,7 @@ object AsRawDerivation:
 
   inline private def getBody[Raw, Real: Done.Of, Plans <: Tuple, Names <: Tuple](
     api: Real,
+  )(
     inv: RawInvocation[Raw],
   ): RawRpc[Raw] =
     matchFrom(
@@ -237,9 +210,5 @@ object AsRawDerivation:
     }
     '{ $res.asInstanceOf[R] }
 
-  private def rejectImpl(inv: Expr[RawInvocation[?]])(using Quotes) = '{
-    throw new IllegalArgumentException("unknown rpc name: " + $inv.rpcName)
-  }
-
-  private def reject(inv: RawInvocation[?]) =
+  private def reject(inv: RawInvocation[?]): Nothing =
     throw new IllegalArgumentException("unknown rpc name: " + inv.rpcName)

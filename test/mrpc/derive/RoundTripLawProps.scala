@@ -1,4 +1,5 @@
-package mrpc.derive
+package mrpc
+package derive
 
 import scala.concurrent.duration.Duration
 import scala.concurrent.{Await, ExecutionContext, Future}
@@ -38,8 +39,7 @@ class RoundTripLawProps extends munit.ScalaCheckSuite:
     def ping(): Unit = ()
     def increment(n: Int): Future[Int] = Future.successful(n + 1)
     def find(id: Int): Future[User] = Future.successful(User(id, s"user-$id"))
-    def users: UsersRpc = new UsersRpc:
-      def count(): Future[Int] = Future.successful(7)
+    def users: UsersRpc = () => Future.successful(7)
     def lookup(id: Int): Future[User] = Future.successful(User(id, "by-id"))
     def lookup(name: String): Future[User] = Future.successful(User(-1, name))
     def combine(a: Int)(b: String, c: Long): Future[String] = Future.successful(s"$a-$b-$c")
