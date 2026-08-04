@@ -17,9 +17,9 @@ private[mrpc] trait Param:
   type Label <: String
   type ParamType
   type Metadata <: Tuple
-  
+
 object Param:
-  type Of[X] = Param{ type ParamType = X}
+  type Of[X] = Param { type ParamType = X }
 
 /**
  * Reflection helpers that read the type-level members of a refined `DoneOperation` (and its
@@ -36,14 +36,10 @@ object Param:
  * metadata materialization — one Done-walk path, no fork.
  */
 private[mrpc] object OpReflect:
-  /** The op's (or param's) `Metadata` tuple entries as types (each an `AnnotatedType(Meta, annot)`). */
-  def metadataEntries(t: Type[? <: { type Metadata <: Tuple }])(using Quotes): List[Type[?]] = t match
-    case '[type meta <: Tuple; { type Metadata = meta }] => TupleTraverse.traverseTuple[meta, made.Meta]
-    case _ => Nil
 
   /** `true` when the op carries an annotation of type `A`. */
-  def hasAnnotation[A: {Type, FromExpr}](opType: Type[? <: DoneOperation])(using Quotes): Boolean =
-    findAnnotation[A](opType).isDefined
+  def hasAnnotation[A: {Type, FromExpr}, Metadata <: Tuple: Type](using Quotes): Boolean =
+    findAnnotation[A, Metadata].isDefined
 
   /**
    * Whether a parameter type is the abstract `Raw` carrier. In this standalone matcher `Raw` is not a
@@ -60,9 +56,11 @@ private[mrpc] object OpReflect:
   // --- internals ---
 
   /** Locates an annotation term of type `A` in the op's `Metadata`, like made's `getAnnotationImpl`. */
-  def findAnnotation[A: {Type, FromExpr}](using q: Quotes)(opType: Type[? <: DoneOperation]): Option[A] =
+  def findAnnotation[A: {Type, FromExpr}, Metadata <: Tuple: Type](using q: Quotes): Option[A] =
     import q.reflect.*
-    metadataEntries(opType).iterator
+    TupleTraverse
+      .traverseTuple[Metadata, made.Meta]
+      .iterator
       .map(t => TypeRepr.of(using t))
       .collectFirst:
         case AnnotatedType(_, annot) if annot.tpe <:< TypeRepr.of[A] => annot.asExprOf[A].valueOrAbort

@@ -1,6 +1,7 @@
 package mrpc.derive
 
 import made.*
+
 import scala.quoted.*
 
 /**
@@ -29,27 +30,29 @@ object RpcNames:
         case ([l0 <: String] =>> DoneOperation { type Label = l0 })[l] => l,
     ], done.Operations]
   }
-  
+
   private def deriveImpl[T: Type, Labels <: Tuple: Type, Operations <: Tuple: Type](using Quotes): Expr[RpcNames[T]] =
     val ops = TupleTraverse.traverseTuple[Operations, DoneOperation]
-    val bases = ops.map: op =>
-      OpReflect
-        .findAnnotation[mrpc.annotation.rpcName](op)
-        .map(_.name)
-        .getOrElse(op match
-          case '[type l <: String; { type Label = l }] => Type.valueOfConstant[l].get)
+    val bases = ops.map:
+      case '[type l <: String; type meta <: Tuple; { type Label = l; type Metadata = meta }] =>
+        OpReflect
+          .findAnnotation[mrpc.annotation.rpcName, meta]
+          .map(_.name)
+          .getOrElse(Type.valueOfConstant[l].get)
 
     // Group by base name to detect overloads: a base shared by >1 op is an overloaded set.
     val baseCounts: Map[String, Int] = bases.groupBy(identity).view.mapValues(_.size).toMap
 
     val resolved = ops
       .zip(bases)
-      .map: (op, base) =>
-        val overloaded = baseCounts.getOrElse(base, 0) > 1
-        val prefixed = applyPrefix(op, base, overloaded)
-        // Only overloaded members without their own @rpcName disambiguation get the signature suffix.
-        if overloaded && !OpReflect.hasAnnotation[mrpc.annotation.rpcName](op) then prefixed + overloadSuffix(op)
-        else prefixed
+      .map:
+        case ('[type elems <: Tuple; type meta <: Tuple; { type InputElems = elems; type Metadata = meta }], base) =>
+          val overloaded = baseCounts.getOrElse(base, 0) > 1
+          val prefixed = applyPrefix[meta](base, overloaded)
+          // Only overloaded members without their own @rpcName disambiguation get the signature suffix.
+          if overloaded && !OpReflect.hasAnnotation[mrpc.annotation.rpcName, meta] then prefixed + overloadSuffix[elems]
+          else prefixed
+        case (_, _) => ???
 
     val labels = Type.valueOfTuple[Labels].get.toList.asInstanceOf[List[String]]
 
@@ -64,8 +67,8 @@ object RpcNames:
         }
 
   /** Applies `@rpcNamePrefix` per its `overloadedOnly` flag. */
-  private def applyPrefix(op: Type[? <: DoneOperation], base: String, overloaded: Boolean)(using Quotes): String =
-    OpReflect.findAnnotation[mrpc.annotation.rpcNamePrefix](op) match
+  private def applyPrefix[Metadata <: Tuple: Type](base: String, overloaded: Boolean)(using Quotes): String =
+    OpReflect.findAnnotation[mrpc.annotation.rpcNamePrefix, Metadata] match
       case None => base
       case Some(annot) =>
         if !annot.overloadedOnly || overloaded then annot.prefix + base else base
@@ -75,14 +78,12 @@ object RpcNames:
    * hexadecimal hash of the flattened parameter type `show` strings joined by a separator. Distinct
    * signatures yield distinct suffixes; reordering the overloads does not change any one suffix.
    */
-  private def overloadSuffix(op: Type[?])(using Quotes): String =
-    val sig = op match
-      case '[type elems <: Tuple; DoneOperation { type InputElems = elems }] =>
-        TupleTraverse
-          .traverseTuple[elems, InputElem]
-          .map:
-            case '[{ type Type = t }] => Type.show[t]
-          .mkString("(", ",", ")")
+  private def overloadSuffix[Elems <: Tuple: Type](using Quotes): String =
+    val sig = TupleTraverse
+      .traverseTuple[Elems, InputElem]
+      .map:
+        case '[{ type Type = t }] => Type.show[t]
+      .mkString("(", ",", ")")
     val hash = sig.hashCode & 0x7fffffff
     s"_${hash.toHexString}"
 

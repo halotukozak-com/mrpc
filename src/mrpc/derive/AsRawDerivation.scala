@@ -7,7 +7,6 @@ import mrpc.raw.{RawInvocation, RawRpc}
 import mrpc.realCons
 
 import scala.concurrent.{ExecutionContext, Future}
-import scala.quoted.*
 
 /**
  * Server-adapter derivation: builds an `AsRaw[RawRpc[Raw], Real]` that turns a real trait instance
