@@ -4,8 +4,7 @@ package derive
 import mrpc.conv.{AsRaw, AsReal}
 import mrpc.raw.{RawInvocation, RawRpc}
 
-import scala.concurrent.{ExecutionContext, Future}
-import scala.quoted.*
+import scala.concurrent.ExecutionContext
 
 opaque type Handler[Raw, Plan <: OpPlan] = EmptyHandler[Raw, Plan] | NonEmptyHandler[Raw, Plan]
 
@@ -41,63 +40,36 @@ object Handler:
   inline def handlerBody[Raw: RawRpc as raw, Plan <: OpPlan, Args <: Tuple, Name <: String, Lists <: Tuple](
     tup: Args,
   )(using ec: ExecutionContext,
-  ) =
-    ${ handlerBodyImpl[Raw, Plan, Args, Name, Lists]('tup, 'raw, 'ec) }
+  ): Any =
+    val invocation = RawInvocation[Raw](
+      compiletime.constValue[Name],
+      splitBySizes(encodeArgs[Raw](tup), scala.compiletime.constValueTuple[Lists].toList.asInstanceOf[List[Int]]),
+    )
+    inline compiletime.erasedValue[Plan] match
+      case plan =>
+        inline compiletime.erasedValue[plan.ArityInfo] match
+          case _: ArityTag.Fire => raw.fire(invocation)
+          case _: ArityTag.Call[r] =>
+            AsReal.forFuture[Raw, r](using scala.compiletime.summonInline[AsReal[Raw, r]], ec).asReal(raw.call(invocation))
+          case _: ArityTag.Get[sub] =>
+            AsReal
+              .makeLazy[RawRpc[Raw], sub](scala.compiletime.summonInline[AsReal[RawRpc[Raw], sub]])
+              .asReal(raw.get(invocation))
 
-  private def handlerBodyImpl[
-    Raw: Type,
-    Plan <: OpPlan: Type,
-    Args <: Tuple: Type,
-    Name <: String: Type,
-    Lists <: Tuple: Type,
-  ](
-    args: Expr[? <: Tuple],
-    raw: Expr[RawRpc[Raw]],
-    ec: Expr[ExecutionContext],
-  )(using Quotes,
-  ): Expr[?] =
-    /** Splits `items` into consecutive groups of the given `sizes` (the inverse of `flatten`). */
-    def splitBySizes[A](items: List[A], sizes: List[Int]): List[List[A]] =
-      sizes
-        .foldLeft((remaining = items, acc = List.empty[List[A]])) { case ((remaining, acc), n) =>
-          val (group, rest) = remaining.splitAt(n)
-          (rest, group :: acc)
-        }
-        .acc
-        .reverse
+  /** Encodes each element of a plain (non-`NamedTuple`) args tuple to `Raw` via its own summoned `AsRaw[Raw, h]`. */
+  private inline def encodeArgs[Raw](tup: Tuple): List[Raw] = inline tup match
+    case _: EmptyTuple => Nil
+    case _: (h *: t) =>
+      val head = tup.head.asInstanceOf[h]
+      val tail = tup.tail.asInstanceOf[t]
+      scala.compiletime.summonInline[AsRaw[Raw, h]].asRaw(head) :: encodeArgs[Raw](tail)
 
-    // Recover positional argument terms from the args tuple, each cast to its exact declared type, so
-    // the per-param `AsRaw[Raw, t]` encoder applies as the source would. `Args` carries no `Product`
-    // bound, so `args` is cast to `Product` here — safe, since every `Args` this is called with
-    // (`EmptyTuple` or a `NamedTuple`) IS one at runtime.
-    val flatArgTerms: List[Expr[?]] = TupleTraverse.traverseTuple[Args, Any].zipWithIndex.map {
-      case ('[t], i) => '{ $args(${ Expr(i) }).asInstanceOf[t] }
-      case (_, _) => ???
-    }
-
-    val invocation =
-      val encodedArgs: List[Expr[Raw]] = flatArgTerms.map { case '{ $arg: arg } =>
-        '{ scala.compiletime.summonInline[AsRaw[Raw, arg]].asRaw($arg) }
+  /** Splits `items` into consecutive groups of the given `sizes` — the inverse of `flatten`. */
+  private def splitBySizes[A](items: List[A], sizes: List[Int]): List[List[A]] =
+    sizes
+      .foldLeft((remaining = items, acc = List.empty[List[A]])) { case ((remaining, acc), n) =>
+        val (group, rest) = remaining.splitAt(n)
+        (rest, group :: acc)
       }
-
-      val sizes = Type.valueOfTuple[Lists].get.toList.asInstanceOf[List[Int]]
-      val nested: List[List[Expr[Raw]]] = splitBySizes(encodedArgs, sizes)
-      val nestedExprs: List[Expr[List[Raw]]] = nested.map(inner => Expr.ofList(inner))
-      val argsExpr: Expr[List[List[Raw]]] = Expr.ofList(nestedExprs)
-
-      '{ RawInvocation[Raw](compiletime.constValue[Name], $argsExpr) }
-
-    Type.of[Plan] match
-      case '[{ type ArityInfo = ArityTag.Fire }] =>
-        '{ $raw.fire($invocation) }
-      case '[{ type ArityInfo = ArityTag.Call[r] }] =>
-        '{
-          val futureDecoder: AsReal[Future[Raw], Future[r]] =
-            AsReal.forFuture[Raw, r](using scala.compiletime.summonInline[AsReal[Raw, r]], $ec)
-          futureDecoder.asReal($raw.call($invocation))
-        }
-      case '[{ type ArityInfo = ArityTag.Get[sub] }] =>
-        '{
-          val subProxy = compiletime.summonInline[AsReal[RawRpc[Raw], sub]]
-          AsReal.makeLazy[RawRpc[Raw], sub](subProxy).asReal($raw.get($invocation))
-        }
+      .acc
+      .reverse
