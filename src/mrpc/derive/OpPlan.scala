@@ -1,4 +1,5 @@
-package mrpc.derive
+package mrpc
+package derive
 
 import made.*
 
@@ -66,6 +67,8 @@ private[derive] sealed trait OpPlan:
 
 object OpPlan:
 
+  private val reusable = new OpPlan {}
+
   /**
    * [[OpPlan.Args]], off a still-abstract `Op <: OpPlan` — `Op#Args` (general type projection on a
    * non-singleton prefix) is disallowed, and `Args` itself is a concrete alias (not a bare abstract
@@ -82,6 +85,8 @@ object OpPlan:
           case ([p0] =>> ParamPlan { type ParamType = p0 })[p] => p,
       ]
 
+  transparent inline def materialize[Op <: DoneOperation, Name <: String]: OpPlan = ${ materializeImpl[Op, Name] }
+
   /**
    * Classifies a single operation (its resolved rpcName + its `DoneOperation` type) into a fully
    * refined [[OpPlan]] type: arity (from `OutputType`), a per-parameter encode-vs-verbatim plan, and
@@ -96,14 +101,14 @@ object OpPlan:
    * `transparent inline given` infers when summoned into that position. [[Plans]] therefore builds its
    * `All` tuple type directly from this macro-level `Type[? <: OpPlan]`, not from a per-op `given`.
    */
-  private[derive] def classify(opType: Type[? <: DoneOperation], rpcName: Type[? <: String])(using quotes: Quotes)
-    : Type[? <: OpPlan] =
+  private[derive] def materializeImpl[Op <: DoneOperation: Type, Name <: String: Type](using quotes: Quotes)
+    : Expr[OpPlan] =
     import quotes.reflect.*
-    val arityType = opType match
+    val arityType = Type.of[Op] match
       case '[{ type OutputType = Unit }] => Type.of[ArityTag.Fire]
       case '[{ type OutputType = Future[x] }] => Type.of[ArityTag.CallOf[x]]
       case '[{ type OutputType = other }] => Type.of[ArityTag.GetOf[other]]
-    val paramsType: Type[? <: Tuple] = TupleTraverse.foldTuple(opType match
+    val paramsType: Type[? <: Tuple] = TupleTraverse.foldTuple(Type.of[Op] match
       case '[type elems <: Tuple; DoneOperation { type InputElems = elems }] =>
         TupleTraverse
           .traverseTuple[elems, InputElem]
@@ -124,25 +129,25 @@ object OpPlan:
     // Under the fixed-RawRpc model the result is always encoded via the summoned leaf bridge unless
     // it is itself Raw; @verbatim on a non-Raw result has no identity to land on. Result-verbatim is
     // therefore only reachable through the same Raw-type check params use; v1 fixtures encode results.
-    (opType, rpcName, arityType, paramsType, opType) match
+    (Type.of[Op], arityType, paramsType) match
       case (
             '[type l <: String; { type Label = l }],
-            '[type n <: String; n],
             '[type a <: ArityTag; a],
             '[type ps <: Tuple; ps],
-            '[o],
           ) =>
-        Type.of[
-          OpPlan {
-            type Label = l
-            type RpcName = n
-            type ArityInfo = a
-            type Params = ps
-            type ResultEncoding = EncodingTag.Encoded
-            type OpType = o
-          },
-        ]
-      case _ => report.errorAndAbort(s"could not build OpPlan for operation ${TypeRepr.of(using opType).show}")
+        '{
+          reusable.asInstanceOf[
+            OpPlan {
+              type Label = l
+              type RpcName = Name
+              type ArityInfo = a
+              type Params = ps
+              type ResultEncoding = EncodingTag.Encoded
+              type OpType = Op
+            },
+          ]
+        }
+      case _ => report.errorAndAbort(s"could not build OpPlan for operation ${Type.show[Op]}")
 
 /**
  * Every operation of `T`, classified once — the single authority [[Matcher]] and the client-proxy
@@ -156,24 +161,20 @@ sealed trait Plans[T]:
   given Underlying containsOnly OpPlan = containsOnly.refl
 
 object Plans:
-  transparent inline def materialize[T: {Done.Of as done, RpcNames as names}]: Plans[T] =
-    ${ derive[T, names.Underlying, done.Operations]('done) }
+  private val reusable = new Plans[Any] {}
 
-  /**
-   * Builds `Plans[T]`'s `All` from [[OpPlan.classify]], one op at a time (in `Done.Operations` order) —
-   * a macro, not a `Tuple.Map`-over-a-per-op-`given`, precisely because `classify`'s richer per-op type
-   * (see its doc) only exists at this macro level; folding `Type[? <: OpPlan]`s with
-   * [[TupleTraverse.foldTuple]] is what actually carries it into `All`.
-   */
-  private def derive[T: Type, Names <: Tuple: Type, Operations <: Tuple: Type](done: Expr[Done.Of[T]])(using Quotes)
-    : Expr[Plans[T]] =
-    val ops = TupleTraverse.traverseTuple[Operations, DoneOperation]
-    val resolvedNames = TupleTraverse.traverseTuple[Names, String]
-    val opPlanTypes = ops.zip(resolvedNames).map((op, name) => OpPlan.classify(op, name))
-    TupleTraverse.foldTuple(opPlanTypes) match
-      case '[type all <: Tuple; all] =>
-        '{
-          (new Plans[T]:
-            type Underlying = all
-          ): Plans[T] { type Underlying = all }
-        }
+  private def apply[T](plans: Tuple): Plans[T] { type Underlying = plans.type } = reusable.asInstanceOf[
+    Plans[T] {
+      type Underlying = plans.type
+    },
+  ]
+
+  transparent inline def materialize[T: {Done.Of as done, RpcNames as names}]: Plans[T] =
+    Plans(buildAll[Tuple.Zip[names.Underlying, done.Operations]])
+
+  private transparent inline def buildAll[Acc <: Tuple](
+    using Acc containsOnly (String, DoneOperation),
+  ): Tuple = inline compiletime.erasedValue[Acc] match
+    case _: EmptyTuple => EmptyTuple
+    case _: ((name, op) *: next) =>
+      buildAll[next & Tuple.Tail[Acc]].realCons(OpPlan.materialize[op & DoneOperation, name & String])

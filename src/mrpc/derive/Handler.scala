@@ -15,7 +15,8 @@ sealed trait NonEmptyHandler[Raw, Op <: OpPlan] extends Handler[Raw, Op], ((OpPl
 
 object Handler:
 
-  /** Factored out of the `given` below (an ordinary, non-`inline` method) so the anonymous
+  /**
+   * Factored out of the `given` below (an ordinary, non-`inline` method) so the anonymous
    * `EmptyHandler`/`NonEmptyHandler` class bodies are compiled once, generically — not duplicated at
    * every inline site the `given` expands to.
    */
@@ -40,7 +41,7 @@ object Handler:
     inline compiletime.erasedValue[Plan] match
       case plan =>
         inline compiletime.erasedValue[plan.OpType] match
-          case op: DoneOperation =>
+          case op =>
             inline compiletime.erasedValue[plan.Args] match
               case _: EmptyTuple =>
                 emptyHandler[Raw, Plan] { () =>
