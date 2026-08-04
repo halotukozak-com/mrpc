@@ -69,44 +69,29 @@ object AsRawDerivation:
 
   // --- arity-partitioned dispatch bodies ---
 
-  transparent inline private def fireArms[Raw, Real: Done.Of, Acc <: Tuple](
-    api: Real,
-  ): Tuple = arms[Raw, Real, Acc, [X] =>> Unit](
-    [A <: ArityTag, Op <: OpPlan, Args <: Tuple] =>
-      index =>
-        inline compiletime.erasedValue[A] match
-          case _: ArityTag.Fire =>
-            (inv: RawInvocation[Raw]) => invoke[Raw, Real, Any, Op, Args](api, inv, index): Unit
-          case _ => (inv: RawInvocation[Raw]) => reject(inv)
-    ,
-    api,
-  )(0)
-
   /**
-   * Each body builds `values` over EVERY entry of `plans` (not just its own arity), positionally
-   * aligned with the shared `Names` by construction — an op outside this body's own arity gets a
-   * `rejectImpl` thunk in its slot instead of real dispatch logic. This is what keeps `Names`/`values`
-   * from silently drifting apart (the bug a per-body-filtered `Names` had): there is no separate
-   * filter step to fall out of sync with `values`'s own filter.
+   * Each of `fireArms`/`callArms`/`bodyArms` walks `Acc` (= `Plans`) directly, matching each op's OWN
+   * `ArityInfo` inline — NOT through a shared generic `arms` helper taking a `[A <: ArityTag, ...] =>
+   * ...` callback: that indirection lost `A`'s concreteness. `op.ArityInfo` reads as the real, concrete
+   * arity tag right here (proven directly), but the SAME type, passed through a polymorphic function
+   * VALUE's own type parameter and re-matched INSIDE that value's body, no longer resolved to a
+   * concrete case there — the inner match always fell to its `case _ =>` filler branch, for every op,
+   * regardless of its real arity. Duplicating the ~10-line recursion three times avoids that layer.
    *
-   * Every value is a THUNK (`() => Result`), not the invocation itself: `matchFromImpl` builds
-   * `case name => args(index)` over the WHOLE `values` tuple, and constructing that tuple at all
-   * would otherwise force every op's `invokeOp` — decoding `inv`'s args against every op's own,
-   * generally mismatched, parameter types, and running every op's real implementation — on every
-   * single dispatch, not just the one op whose name matched. Thunking defers all of that to the
-   * final `()` below, which only ever runs the ONE arm `matchFromImpl` actually selected.
+   * Every value built here is over EVERY entry of `Acc` (not just this body's own arity), positionally
+   * aligned with the shared `Names` (computed once in `buildRawRpc`) by construction — an op outside
+   * this body's own arity gets a `reject` thunk in its slot instead of real dispatch logic. This is
+   * what keeps `Names`/`values` from silently drifting apart: there is no separate filter step to fall
+   * out of sync with the other's filter.
+   *
+   * Every value is a THUNK (`RawInvocation[Raw] => Result`), not the invocation itself: `matchFrom`
+   * builds `case name => args(index)` over the WHOLE `values` tuple, and constructing that tuple at all
+   * would otherwise force every op's `invoke` — decoding `inv`'s args against every op's own, generally
+   * mismatched, parameter types, and running every op's real implementation — on every single dispatch,
+   * not just the one op whose name matched. Thunking defers all of that to the final `(inv)` application
+   * below, which only ever runs the ONE arm `matchFrom` actually selected.
    */
-  inline private def fireBody[Raw, Real, Plans <: Tuple, Names <: Tuple](
-    api: Real,
-  )(
-    inv: RawInvocation[Raw],
-  ): Unit = matchFrom(NamedTuple.build[Names]()(fireArms[Raw, Real, Plans](api)))[RawInvocation[Raw] => Unit](
-    inv.rpcName,
-    reject,
-  )(inv)
-
-  transparent inline private def arms[Raw, Real: Done.Of, Acc <: Tuple, F[_ <: Raw]](
-    inline f: [A <: ArityTag, Op <: OpPlan, Args <: Tuple] => Int => RawInvocation[Raw] => F[Raw],
+  transparent inline private def fireArms[Raw, Real: Done.Of, Acc <: Tuple](
     api: Real,
   )(
     index: Int,
@@ -114,27 +99,41 @@ object AsRawDerivation:
     inline compiletime.erasedValue[Acc] match
       case _: EmptyTuple => EmptyTuple
       case _: (h *: t) =>
-        val arm = inline compiletime.erasedValue[h] match
-          case op: OpPlan =>
-            f[op.ArityInfo, op.type, op.Args](index)
-        arms[Raw, Real, t, F](f, api)(index + 1).realCons(arm)
+        val arm = inline compiletime.erasedValue[h & OpPlan] match
+          case op =>
+            inline compiletime.erasedValue[op.ArityInfo] match
+              case _: ArityTag.Fire =>
+                (inv: RawInvocation[Raw]) => invoke[Raw, Real, Any, op.type, op.Args](api, inv, index): Unit
+              case _ => (inv: RawInvocation[Raw]) => reject(inv)
+        fireArms[Raw, Real, t](api)(index + 1).realCons(arm)
+
+  inline private def fireBody[Raw, Real, Plans <: Tuple, Names <: Tuple](
+    api: Real,
+  )(
+    inv: RawInvocation[Raw],
+  ): Unit = matchFrom(NamedTuple.build[Names]()(fireArms[Raw, Real, Plans](api)(0)))[RawInvocation[Raw] => Unit](
+    inv.rpcName,
+    reject,
+  )(inv)
 
   transparent inline private def callArms[Raw, Real: Done.Of, Acc <: Tuple](
     api: Real,
+  )(
+    index: Int,
   )(using ec: ExecutionContext,
   ): Tuple =
-    arms[Raw, Real, Acc, Future](
-      [A <: ArityTag, Op <: OpPlan, Args <: Tuple] =>
-        index =>
-          inline compiletime.erasedValue[A] match
-            case _: ArityTag.Call[r] =>
-              (inv: RawInvocation[Raw]) =>
-                val futureEncoder = AsRaw.forFuture[Raw, r](using scala.compiletime.summonInline[AsRaw[Raw, r]], ec)
-                futureEncoder.asRaw(invoke[Raw, Real, Future[r], Op, Args](api, inv, index))
-            case _ => (inv: RawInvocation[Raw]) => reject(inv)
-      ,
-      api,
-    )(0)
+    inline compiletime.erasedValue[Acc] match
+      case _: EmptyTuple => EmptyTuple
+      case _: (h *: t) =>
+        val arm = inline compiletime.erasedValue[h & OpPlan] match
+          case op =>
+            inline compiletime.erasedValue[op.ArityInfo] match
+              case _: ArityTag.Call[r] =>
+                (inv: RawInvocation[Raw]) =>
+                  val futureEncoder = AsRaw.forFuture[Raw, r](using scala.compiletime.summonInline[AsRaw[Raw, r]], ec)
+                  futureEncoder.asRaw(invoke[Raw, Real, Future[r], op.type, op.Args](api, inv, index))
+              case _ => (inv: RawInvocation[Raw]) => reject(inv)
+        callArms[Raw, Real, t](api)(index + 1).realCons(arm)
 
   inline private def callBody[Raw, Real: Done.Of, Plans <: Tuple, Names <: Tuple](
     api: Real,
@@ -142,25 +141,27 @@ object AsRawDerivation:
     inv: RawInvocation[Raw],
   )(using ExecutionContext,
   ): Future[Raw] = matchFrom(
-    NamedTuple.build[Names]()(callArms[Raw, Real, Plans](api)),
+    NamedTuple.build[Names]()(callArms[Raw, Real, Plans](api)(0)),
   )[RawInvocation[Raw] => Future[Raw]](inv.rpcName, reject)(inv)
 
   transparent inline private def bodyArms[Raw, Real: Done.Of, Acc <: Tuple](
     api: Real,
+  )(
+    index: Int,
   ): Tuple =
-    arms[Raw, Real, Acc, RawRpc](
-      [A <: ArityTag, Op <: OpPlan, Args <: Tuple] =>
-        index =>
-          inline compiletime.erasedValue[A] match
-            case _: ArityTag.Get[sub] =>
-              (inv: RawInvocation[Raw]) =>
-                AsRaw
-                  .makeLazy[RawRpc[Raw], sub](compiletime.summonInline[AsRaw[RawRpc[Raw], sub]])
-                  .asRaw(invoke[Raw, Real, sub, Op, Args](api, inv, index))
-            case _ => (inv: RawInvocation[Raw]) => reject(inv)
-      ,
-      api,
-    )(0)
+    inline compiletime.erasedValue[Acc] match
+      case _: EmptyTuple => EmptyTuple
+      case _: (h *: t) =>
+        val arm = inline compiletime.erasedValue[h & OpPlan] match
+          case op =>
+            inline compiletime.erasedValue[op.ArityInfo] match
+              case _: ArityTag.Get[sub] =>
+                (inv: RawInvocation[Raw]) =>
+                  AsRaw
+                    .makeLazy[RawRpc[Raw], sub](compiletime.summonInline[AsRaw[RawRpc[Raw], sub]])
+                    .asRaw(invoke[Raw, Real, sub, op.type, op.Args](api, inv, index))
+              case _ => (inv: RawInvocation[Raw]) => reject(inv)
+        bodyArms[Raw, Real, t](api)(index + 1).realCons(arm)
 
   inline private def getBody[Raw, Real: Done.Of, Plans <: Tuple, Names <: Tuple](
     api: Real,
@@ -168,7 +169,7 @@ object AsRawDerivation:
     inv: RawInvocation[Raw],
   ): RawRpc[Raw] =
     matchFrom(
-      NamedTuple.build[Names]()(bodyArms[Raw, Real, Plans](api)),
+      NamedTuple.build[Names]()(bodyArms[Raw, Real, Plans](api)(0)),
     )[RawInvocation[Raw] => RawRpc[Raw]](inv.rpcName, reject)(inv)
 
   // --- shared helpers ---
