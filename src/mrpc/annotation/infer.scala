@@ -2,8 +2,6 @@ package mrpc.annotation
 
 import made.annotation.MetaAnnotation
 
-import scala.quoted.{Expr, FromExpr, Quotes}
-
 /**
  * Steers a metadata-class constructor parameter to be materialized by IMPLICIT SEARCH
  * (`Expr.summon`) for the parameter's declared type. The optional `clue` is surfaced in the

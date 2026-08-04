@@ -2,7 +2,6 @@ package mrpc
 package derive
 
 import mrpc.conv.{AsRaw, AsReal}
-import mrpc.derive.OpPlan.ArgsOf
 import mrpc.raw.{RawInvocation, RawRpc}
 
 import scala.concurrent.{ExecutionContext, Future}
