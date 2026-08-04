@@ -141,31 +141,6 @@ private[mrpc] object MetadataDerivation:
 
     loop[M]
 
-  extension (e: MadeElem) transparent inline private def inferOrAbort[T]: T = ${ inferOrAbortImpl[T, e.Metadata] }
-
-  /**
-   * `@infer`'s implicit search, with a clue-bearing error on failure — `compiletime.summonInline`'s
-   * own diagnostic names the erased type variable (`head.Type`), not the annotation or the param's
-   * real type, so a caller can't tell which `@infer` slot failed without this.
-   */
-  private def inferOrAbortImpl[T: Type, M <: Tuple: Type](using quotes: Quotes): Expr[T] =
-    import quotes.reflect.*
-
-    def clue[Tup <: Tuple: Type]: String = Type.of[Tup] match
-      case '[EmptyTuple] => ""
-      case '[t *: ts] =>
-        TypeRepr.of[t] match
-          case AnnotatedType(_, annot) if annot.tpe <:< TypeRepr.of[mrpc.annotation.infer] =>
-            annot.asExprOf[mrpc.annotation.infer] match
-              case Expr(x) => x.clue
-          case _ => clue[ts]
-
-    Implicits.search(TypeRepr.of[T]) match
-      case success: ImplicitSearchSuccess => success.tree.asExprOf[T]
-      case _: ImplicitSearchFailure =>
-        val clueSuffix = Option(clue[M]).filter(_.nonEmpty).map(c => s" ($c)").getOrElse("")
-        report.errorAndAbort(s"@infer: no given instance for ${Type.show[T]}$clueSuffix")
-
   transparent inline private def arity(e: MadeElem): SlotArity =
     inline if e.hasAnnotation[mrpc.annotation.multi] then SlotArity.Multi
     else inline if e.hasAnnotation[mrpc.annotation.optional] then SlotArity.Optional
@@ -181,7 +156,7 @@ private[mrpc] object MetadataDerivation:
     else inline if e.hasAnnotation[mrpc.annotation.rpcParamMetadata] then
       inline ctx match
         case ctx: Context.Method => rpcParamMetadata[e.Type, e.Label](arity(e))(using ctx)
-    else inline if e.hasAnnotation[mrpc.annotation.infer] then e.inferOrAbort[e.Type]
+    else inline if e.hasAnnotation[mrpc.annotation.infer] then compiletime.summonInline[e.Type]
     else
       compiletime.error(
         "metadata param '" + compiletime.constValue[e.Label] + "' has no recognized steering annotation " +

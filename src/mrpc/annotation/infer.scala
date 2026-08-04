@@ -13,12 +13,4 @@ import scala.quoted.{Expr, FromExpr, Quotes}
  * `made.Done.Metadata`, so this is a plain [[scala.annotation.StaticAnnotation]]. Mirrors commons
  * `infer`.
  */
-final class infer(val clue: String) extends MetaAnnotation:
-  def this() = this("")
-
-private[mrpc] object infer:
-  given FromExpr[infer] with
-    override def unapply(x: Expr[infer])(using Quotes): Option[infer] = x match
-      case '{ new `infer`(${ Expr(clue) }) } => Some(new infer(clue))
-      case '{ new `infer`() } => Some(new infer(""))
-      case _ => None
+final class infer extends MetaAnnotation
