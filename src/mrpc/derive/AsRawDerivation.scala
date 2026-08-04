@@ -11,33 +11,19 @@ import scala.concurrent.{ExecutionContext, Future}
 /**
  * Server-adapter derivation: builds an `AsRaw[RawRpc[Raw], Real]` that turns a real trait instance
  * into a transport-facing [[RawRpc]]. The generated `RawRpc[Raw]` dispatches each incoming
- * [[RawInvocation]] by `rpcName`, decodes every argument to its EXACT declared parameter type via a
+ * [[RawInvocation]] by `rpcName`, decodes every argument to its exact declared parameter type via a
  * summoned `AsReal[Raw, paramType]`, calls `made.Done.invoke`, and encodes the result back to `Raw`.
  *
- * Decoding to the exact `InputElem.Type` before tupling is what makes made's internal unboxing cast
- * (in `DoneOperation.apply`) a provable no-op: the value handed to the tuple is already statically
- * the declared type, so no boxing/unboxing mismatch can crash even on primitives or wrapper types.
- *
- * The `match` arms are PARTITIONED BY ARITY — only `fire`-arity ops appear in `fire`, only
- * `call`-arity in `call`, only `get`-arity in `get`. An `rpcName` outside an arity's known set falls
- * through to an explicit rejection (no silent no-op), mirroring commons' unknown-method handling.
+ * The `fire`/`call`/`get` match arms are partitioned by arity — only `fire`-arity ops appear in
+ * `fire`, and so on. An `rpcName` outside an arity's known set is rejected explicitly (no silent
+ * no-op), mirroring commons' unknown-method handling.
  */
 object AsRawDerivation:
 
-  /**
-   * The server-adapter conversion as a plain value: `asRaw` wraps a `Real` in the `RawRpc[Raw]` built
-   * by [[buildRawRpc]]. The `AsRaw` wrapper is ordinary Scala (a SAM lambda); only the `RawRpc` itself
-   * — its arity-partitioned `fire`/`call`/`get` dispatch — is generated.
-   */
   inline def impl[Raw, Real: Done.Of](plans: Plans[Real])(using ExecutionContext): AsRaw[RawRpc[Raw], Real] =
     (api: Real) => buildRawRpc[Raw, Real, plans.Underlying](api)
 
-  /**
-   * Macro entry: assembles the dispatching `RawRpc[Raw]` for a `Real` instance. `Done.Of[Real]` and
-   * `Plans[Real]` are summoned ONCE here (via their own context bounds) and shared across the
-   * `fire`/`call`/`get` bodies below — unlike three independent macro entries, which would each
-   * re-derive them.
-   */
+  /** Assembles the dispatching `RawRpc[Raw]`; `Done.Of[Real]` is summoned once and shared across `fire`/`call`/`get`. */
   inline private def buildRawRpc[Raw, Real: {Done.Of as done}, Plans <: Tuple](
     api: Real,
   )(using Plans containsOnly OpPlan,
@@ -54,10 +40,7 @@ object AsRawDerivation:
       getBody[Raw, Real, Plans, Names](api),
     )
 
-  /**
-   * `mkRawRpc` is an ordinary, non-`inline` method — an anonymous class defined directly inside an
-   * `inline`/macro body is otherwise recompiled at every inline site.
-   */
+  /** Not `inline` — an anonymous class defined directly inside an inline body would recompile at every call site. */
   private def mkRawRpc[Raw](
     fireFn: RawInvocation[Raw] => Unit,
     callFn: RawInvocation[Raw] => Future[Raw],
@@ -70,26 +53,21 @@ object AsRawDerivation:
   // --- arity-partitioned dispatch bodies ---
 
   /**
-   * Each of `fireArms`/`callArms`/`bodyArms` walks `Acc` (= `Plans`) directly, matching each op's OWN
-   * `ArityInfo` inline — NOT through a shared generic `arms` helper taking a `[A <: ArityTag, ...] =>
-   * ...` callback: that indirection lost `A`'s concreteness. `op.ArityInfo` reads as the real, concrete
-   * arity tag right here (proven directly), but the SAME type, passed through a polymorphic function
-   * VALUE's own type parameter and re-matched INSIDE that value's body, no longer resolved to a
-   * concrete case there — the inner match always fell to its `case _ =>` filler branch, for every op,
-   * regardless of its real arity. Duplicating the ~10-line recursion three times avoids that layer.
+   * `fireArms`/`callArms`/`bodyArms` each walk `Acc` (= `Plans`) directly, matching each op's own
+   * `ArityInfo` inline. This can NOT go through a shared helper taking a `[A <: ArityTag, ...] => ...`
+   * callback: passing the concrete arity type through a polymorphic function value's own type
+   * parameter and re-matching it inside that value's body does not preserve its concreteness — the
+   * inner match always falls to `case _ =>`, for every op, regardless of its real arity.
    *
-   * Every value built here is over EVERY entry of `Acc` (not just this body's own arity), positionally
-   * aligned with the shared `Names` (computed once in `buildRawRpc`) by construction — an op outside
-   * this body's own arity gets a `reject` thunk in its slot instead of real dispatch logic. This is
-   * what keeps `Names`/`values` from silently drifting apart: there is no separate filter step to fall
-   * out of sync with the other's filter.
+   * Every value built here spans EVERY entry of `Acc`, not just this body's own arity, positionally
+   * aligned with the shared `Names` (computed once in `buildRawRpc`): an op outside this body's own
+   * arity gets a `reject` thunk in its slot instead of real dispatch logic, so `Names` and the values
+   * tuple can never drift apart via separate filtering.
    *
-   * Every value is a THUNK (`RawInvocation[Raw] => Result`), not the invocation itself: `matchFrom`
-   * builds `case name => args(index)` over the WHOLE `values` tuple, and constructing that tuple at all
-   * would otherwise force every op's `invoke` — decoding `inv`'s args against every op's own, generally
-   * mismatched, parameter types, and running every op's real implementation — on every single dispatch,
-   * not just the one op whose name matched. Thunking defers all of that to the final `(inv)` application
-   * below, which only ever runs the ONE arm `matchFrom` actually selected.
+   * Each value is a THUNK (`RawInvocation[Raw] => Result`), not the invocation itself: `matchFrom`
+   * builds `case name => args(index)` over the whole values tuple, so if the values were eager,
+   * constructing that tuple would decode and invoke every op on every dispatch, not just the one
+   * whose name matched. The thunk defers that to the final `(inv)` application below.
    */
   transparent inline private def fireArms[Raw, Real: Done.Of, Acc <: Tuple](
     api: Real,
@@ -135,7 +113,7 @@ object AsRawDerivation:
               case _ => (inv: RawInvocation[Raw]) => reject(inv)
         callArms[Raw, Real, t](api)(index + 1).realCons(arm)
 
-  inline private def callBody[Raw, Real: Done.Of, Plans <: Tuple, Names <: Tuple](
+  inline private def callBody[Raw, Real, Plans <: Tuple, Names <: Tuple](
     api: Real,
   )(
     inv: RawInvocation[Raw],
@@ -163,7 +141,7 @@ object AsRawDerivation:
               case _ => (inv: RawInvocation[Raw]) => reject(inv)
         bodyArms[Raw, Real, t](api)(index + 1).realCons(arm)
 
-  inline private def getBody[Raw, Real: Done.Of, Plans <: Tuple, Names <: Tuple](
+  inline private def getBody[Raw, Real, Plans <: Tuple, Names <: Tuple](
     api: Real,
   )(
     inv: RawInvocation[Raw],

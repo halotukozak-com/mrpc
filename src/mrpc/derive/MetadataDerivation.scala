@@ -7,38 +7,29 @@ import scala.annotation.Annotation
 import scala.quoted.{Expr, Quotes, Type}
 
 /**
- * The metadata-class-param-driven `materialize` macro — the heart of Phase 10.
- *
- * Unlike a blind `Done`-walk emitting a fixed flat shape, this macro
- * is driven by the METADATA CLASS `M`'s primary-constructor params: it reads each param's steering
- * annotation, classifies it, and fills it from the real trait's `made.Done` structure plus the engine's
- * shared introspection. The emitted value is `new M[Real](<filled params>)`.
+ * The metadata-class-param-driven `materialize` macro. Unlike a blind `Done`-walk emitting a fixed flat
+ * shape, this is driven by the METADATA CLASS `M`'s primary-constructor params: it reads each param's
+ * steering annotation, classifies it, and fills it from the real trait's `made.Done` structure. The
+ * emitted value is `new M[Real](<filled params>)`.
  *
  * Steering vocabulary honored:
- *   - `@composite`                     -> recurse `buildValue` over the param type's primary ctor against
- *                                         the SAME real-symbol context (NameInfo flattening; Pitfall 3).
+ *   - `@composite`                     -> recurse `buildValue` over the param type's primary ctor,
+ *                                         against the SAME real-symbol [[Context]].
  *   - `@reifyName`                     -> the made `label` (source name) of the current op/param.
- *   - `@reifyName(useRawName = true)`  -> the RESOLVED rpcName ([[RpcNames]]'s resolution) — == the engine's.
- *   - `@reifyAnnot` (arity-shaped)     -> the real annotation instance(s), read via the made `getAnnotation`
- *                                         idiom. `@single`/`A` -> the instance (aborts if absent);
- *                                         `@optional`/`Option[A]` -> `Option`; `@multi`/`List[A]` -> ALL
- *                                         matching annotations on the symbol (the mrpc-owned collect-all walk).
- *   - `@infer`                         -> `Implicits.search[paramType]`; aborts with the `@infer` clue if absent.
- *   - `@rpcMethodMetadata` (arity)     -> projects over the trait's ops (`Context.Trait`'s captured
- *                                         `Ops`/`Names`): `@multi` -> `List`/`Map[String, _]` (keyed by
- *                                         rpcName); `@optional` -> `Option`; `@single` -> exactly one
- *                                         (compile error on 0/>1).
- *   - `@rpcParamMetadata` (arity)      -> projects over the op's `InputElems` (declaration order, via
- *                                         [[OpReflect]]/[[TupleTraverse]]), same arity shaping; `Map`
- *                                         slots keyed by paramName.
+ *   - `@reifyName(useRawName = true)`  -> the RESOLVED rpcName ([[RpcNames]]'s resolution).
+ *   - `@reifyAnnot` (arity-shaped)     -> the real annotation instance(s), read via made's
+ *                                         `getAnnotation` idiom. `@single`/`A` -> the instance (aborts
+ *                                         if absent); `@optional`/`Option[A]` -> `Option`;
+ *                                         `@multi`/`List[A]` -> all matching annotations.
+ *   - `@infer`                         -> `Implicits.search[paramType]`; aborts with a clue if absent.
+ *   - `@rpcMethodMetadata` (arity)     -> projects over the trait's ops: `@multi` -> `List`/
+ *                                         `Map[String, _]` keyed by rpcName; `@optional` -> `Option`;
+ *                                         `@single` -> exactly one (compile error on 0/>1).
+ *   - `@rpcParamMetadata` (arity)      -> same arity shaping, projected over the op's `InputElems`;
+ *                                         `Map` slots keyed by paramName.
  *
- * No-fork guarantee: resolved rpcNames come from [[RpcNames]] and the op set from `Done.Of[Real]` —
- * the SAME engine introspection the matcher/dispatcher use. The metadata cannot drift from what the
- * engine dispatches.
- *
- * Pitfall-3 (`@composite`): the per-element build threads a [[Context]] (the current op / param `Type`),
- * and `@composite` recurses with the SAME `Context` so the nested class's `@reifyName` reads the real
- * symbol, not its own field names.
+ * Resolved rpcNames come from [[RpcNames]] and the op set from `Done.Of[Real]` — the same engine
+ * introspection the dispatcher uses, so metadata cannot drift from what the engine dispatches.
  */
 private[mrpc] object MetadataDerivation:
 
@@ -114,7 +105,7 @@ private[mrpc] object MetadataDerivation:
 
   inline private def buildValue[M: Made.Of as made](using Context): M =
     val p = made.asInstanceOf[Made.ProductOf[M]]
-    val elems = fillAllParams(made.elems).asInstanceOf[p.ElemTypes] // todo: can we avoid this asIsntanceOf?
+    val elems = fillAllParams(made.elems).asInstanceOf[p.ElemTypes] // todo: can we avoid this asInstanceOf?
     p.fromTuple(elems)
 
   inline private def fillAllParams(elems: Tuple)(using Context): Tuple = inline elems match
@@ -179,7 +170,7 @@ private[mrpc] object MetadataDerivation:
   /**
    * `@composite`: the param's type C is a class with a public primary ctor; recurse `buildValue(C, ctx)`
    * threading the SAME real-symbol context, so C's `@reifyName` reads the enclosing real symbol (the op
-   * or param), NOT C's field names (research Pitfall 3). Emits `new C(<filled params>)`.
+   * or param), NOT C's field names. Emits `new C(<filled params>)`.
    */
   inline private def composite[M](using Context): M =
     buildValue[M]
@@ -195,56 +186,38 @@ private[mrpc] object MetadataDerivation:
 
   /**
    * `@reifyAnnot` (arity-sensitive): finds the param's annotation type `A` in the current context's
-   * captured `Metadata` via the made `getAnnotationImpl` idiom (a `<:<` match over `AnnotatedType(_,
-   * annot)` entries). Slot shape by arity:
-   *   - `@single` (or bare slot `A`)  -> the single instance; `report.errorAndAbort` if absent (the
-   *                                      `@single` mismatch surfaced by `MetadataCompileErrorSuite`).
+   * captured `Metadata` via made's `getAllAnnotations`. Slot shape by arity:
+   *   - `@single` (or bare slot `A`)   -> the single instance; aborts if absent.
    *   - `@optional` / slot `Option[A]` -> `Some(a)`/`None`.
-   *   - `@multi` / slot `List[A]`      -> ALL matching annotations on the symbol (the mrpc-owned
-   *                                      tuple walk: collect every `AnnotatedType(_, a)` with `a.tpe <:< A`).
+   *   - `@multi` / slot `List[A]`      -> all matching annotations on the symbol.
+   *
+   * Pulled out as its own `inline` def rather than nested inside `reifyAnnot` because nested `inline`
+   * defs aren't supported, and `ctx.op`/`ctx.underlying`'s captured `Metadata` is only visible to
+   * `getAllAnnotations` while this match is itself `inline` in a context where `ctx` hasn't already
+   * been widened to the bare `Context` supertype.
    */
-  // Pulled out of `reifyAnnot` (rather than a locally-nested `def`) for two reasons: nested `inline`
-  // methods aren't supported, and — more importantly — `ctx.op`/`ctx.underlying`'s real refined type
-  // (carrying the actual captured `Metadata`) is only visible to `getAllAnnotations` when THIS match
-  // is itself `inline` in a context where `ctx` hasn't already been widened to the bare `Context`
-  // supertype by an intervening non-inline call frame.
   inline private def allTerms[A](using Context): List[A] = inline ctx match
     case ctx: Context.Method => getAllAnnotations(ctx.op)(using containsOnly.refl)[A & Annotation]
     case ctx: Context.Param => getAllAnnotations(ctx.underlying)(using containsOnly.refl)[A & Annotation]
     case _: Context.Trait => compiletime.error("@reifyAnnot is not valid at the trait level")
 
   inline private def reifyAnnot[Param](arity: SlotArity)(using Context): Any =
-    // Resolve the slot's annotation element type from its declared shape (List[A]/Option[A]/A),
-    // cross-checked against the steering arity marker.
     inline (arity, compiletime.erasedValue[Param]) match
-      case (_: SlotArity.Multi, _: List[a]) =>
-        // collect-all: every annotation of type A on the symbol.
-        allTerms[a]
-      case (_: SlotArity.Multi, _) =>
-        // @multi over a non-List @reifyAnnot slot is the declared annotation type collected directly.
-        allTerms[Param]
-      case (_: SlotArity.Optional, _: Option[a]) =>
-        allTerms[a].headOption
-      case (_, _: Option[a]) =>
-        // a bare Option[A] slot is treated as optional regardless of the marker.
-        allTerms[a].headOption
+      case (_: SlotArity.Multi, _: List[a]) => allTerms[a]
+      case (_: SlotArity.Multi, _) => allTerms[Param]
+      case (_: SlotArity.Optional, _: Option[a]) => allTerms[a].headOption
+      case (_, _: Option[a]) => allTerms[a].headOption
       case (_, _) =>
-        // @single (or default): exactly one; abort if absent.
         inline allTerms[Param] match
           case term :: _ => term
-          case Nil =>
-            compiletime.error(
-              "@single @reifyAnnot: no annotation"
-              /** ${Type.show[Param]}  * */
-              + "present on the RPC element",
-            )
+          case Nil => compiletime.error("@single @reifyAnnot: no annotation present on the RPC element")
 
   /**
    * `@rpcMethodMetadata`: projects over the trait's ops. Arity-shaped:
    *   - `@multi List[E]`             -> one element per op, collected into a `List`.
    *   - `@multi Map[String, E]`      -> one element per op, keyed by resolved rpcName.
    *   - `@optional Option[E]`        -> the single op if exactly one, else `None`.
-   *   - `@single E` (or default)     -> the single op; `report.errorAndAbort` on 0 or >1 (research Pitfall 4).
+   *   - `@single E` (or default)     -> the single op; aborts on 0 or >1.
    * Each element recurses `buildValue` in a per-op [[Context.Method]].
    */
 
@@ -297,7 +270,7 @@ private[mrpc] object MetadataDerivation:
               case (it: DoneOperation) :: Nil => Some(buildElem[e, it.Type])
               case _ =>
                 compiletime.error(
-                  "@rpcMethodMetadat @optional slot '" + compiletime.constValue[Name] + "' matched " +
+                  "@rpcMethodMetadata @optional slot '" + compiletime.constValue[Name] + "' matched " +
                     ctx.operations.size + " elements; expected 0 or 1",
                 )
       case _: SlotArity.Single =>

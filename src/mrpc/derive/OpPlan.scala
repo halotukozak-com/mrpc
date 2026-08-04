@@ -9,9 +9,8 @@ import scala.quoted.{Expr, Quotes, Type}
 /**
  * Type-level tag for which `RawRpc` dispatch method (`fire`/`call`/`get`) an operation routes to.
  * `Call`/`Get` carry their payload (the `Future` result type / the sub-RPC type) as a type member, so
- * it survives as part of an [[OpPlan]]'s own type. The matcher and the two materialize macros all
- * classify arity by quote-pattern-matching this type directly (`case '[ArityTag.Fire] => ...` /
- * `case '[ArityTag.CallOf[r]] => ...`) — there is no separate value-level enum to keep in sync with it.
+ * it survives as part of an [[OpPlan]]'s own type — classified via `inline compiletime.erasedValue`
+ * matches, no separate value-level enum to keep in sync with it.
  */
 private[derive] sealed class ArityTag
 private[derive] object ArityTag:
@@ -19,10 +18,7 @@ private[derive] object ArityTag:
   sealed class Call[Result] extends ArityTag
   sealed class Get[Sub] extends ArityTag
 
-/**
- * Type-level encode-vs-verbatim tag, classified the same way as [[ArityTag]] — via quote-pattern
- * matching directly on the type, no value-level enum counterpart.
- */
+/** Type-level encode-vs-verbatim tag, classified the same way as [[ArityTag]]. */
 private[derive] sealed trait EncodingTag
 private[derive] object EncodingTag:
   sealed trait Encoded extends EncodingTag
@@ -39,12 +35,10 @@ private[derive] sealed trait ParamPlan:
 
 /**
  * One operation's classification, at the type level: arity, resolved rpcName, per-parameter encode
- * plan, and the underlying `DoneOperation` this plan describes. [[Plans]] collects a `Tuple` of these
- * — one per `Done.Operations` entry, in the same order, so a plan's position in that tuple IS
- * its `Done.Operations` index. Mirrors how made's `Done` models `T` as a `Tuple` of `DoneOperation`s.
- * Read back via local quote-pattern reads on the plan's `Type[?]` (`Matcher`, `AsRawDerivation`, `AsRealDerivation` each
- * keep their own), or directly by test code via `Matcher.planFor`/`Matcher.plansFor` + `summon[... =:=
- * ...]` (see `MatchingSuite`/`RpcNameSuite`) — there is no runtime-comparable projection of an `OpPlan`.
+ * plan, and the underlying `DoneOperation` this plan describes. [[Plans]] collects a `Tuple` of these,
+ * one per `Done.Operations` entry, in the same order, so a plan's position in that tuple IS its
+ * `Done.Operations` index. There is no runtime-comparable projection of an `OpPlan` — only its static
+ * type is ever read, via inline/quote-pattern matches.
  */
 private[derive] sealed trait OpPlan:
   type Label <: String
@@ -68,9 +62,8 @@ object OpPlan:
    * [[OpPlan.Args]], off a still-abstract `Plan <: OpPlan` — `Plan#Args` (general type projection on a
    * non-singleton prefix) is disallowed, and `Args` itself is a concrete alias (not a bare abstract
    * member), so a match type can't refine it directly either; this recomputes it from `Params` (which
-   * IS abstract) via the same type-lambda-application idiom [[RpcNames]]/[[Matcher]] use to extract a
-   * member off an abstract type parameter. Only needed in ordinary (non-macro) declarations like
-   * [[Handler]]'s trait hierarchy; macro code just quote-pattern-matches `Type[Plan]` directly.
+   * IS abstract) instead. Only needed in ordinary (non-macro) declarations like [[Handler]]'s trait
+   * hierarchy; macro code just quote-pattern-matches `Type[Plan]` directly.
    */
   type ArgsOf[Plan <: OpPlan] = Plan match
     case ([p <: Tuple] =>> OpPlan { type Params = p })[params] =>
@@ -86,15 +79,13 @@ object OpPlan:
    * Classifies a single operation (its resolved rpcName + its `DoneOperation` type) into a fully
    * refined [[OpPlan]] type: arity (from `OutputType`), a per-parameter encode-vs-verbatim plan, and
    * the underlying `OpType`/`RpcName`. The ONLY place classification happens — [[Plans]] (which collects
-   * one per `T`, once) is its only caller; [[Matcher]] and every other consumer read already-classified
-   * [[OpPlan]]s back off [[Plans]] instead of re-deriving them.
+   * one per `T`, once) is its only caller; every other consumer reads already-classified [[OpPlan]]s
+   * back off [[Plans]] instead of re-deriving them.
    *
-   * MUST be a macro (not an ordinary `transparent inline given`, `Tuple.Map`-summoned per position):
-   * the richer type it returns here (`ArityInfo`/`Params`/... set, not just `OpType`/`RpcName`) does NOT
-   * propagate through a plain `compiletime.summonAll[Tuple.Map[..., SomeAlias[op, n]]]` — the tuple's
-   * static element type is fixed to whatever alias the `Tuple.Map` lambda names, regardless of what a
-   * `transparent inline given` infers when summoned into that position. [[Plans]] therefore builds its
-   * `All` tuple type directly from this macro-level `Type[? <: OpPlan]`, not from a per-op `given`.
+   * MUST be a macro, not a `transparent inline given` summoned per position via `Tuple.Map`: the
+   * richer type returned here (`ArityInfo`/`Params`/... set, not just `OpType`/`RpcName`) does not
+   * propagate through `compiletime.summonAll` — the tuple's static element type there is fixed to
+   * whatever alias the `Tuple.Map` lambda names, regardless of what the `given` actually infers.
    */
   private[derive] def materializeImpl[Op <: DoneOperation: Type, Name <: String: Type](using quotes: Quotes)
     : Expr[OpPlan] =
@@ -145,11 +136,10 @@ object OpPlan:
       case _ => report.errorAndAbort(s"could not build OpPlan for operation ${Type.show[Op]}")
 
 /**
- * Every operation of `T`, classified once — the single authority [[Matcher]] and the client-proxy
- * materialization ([[AsRealDerivation]] / [[Handler]]) both read from, instead of each re-deriving
- * [[OpPlan]]s of their own. `All` is a tuple of fully refined [[OpPlan]] types (one per
- * `Done.Operations` entry, in order); `all` is the same tuple as a runtime value (never dereferenced,
- * same convention as [[OpPlan]] itself — only its STATIC type is ever read).
+ * Every operation of `T`, classified once — the single authority [[AsRawDerivation]] and
+ * [[AsRealDerivation]] both read from, instead of each re-deriving [[OpPlan]]s of their own.
+ * `Underlying` is a tuple of fully refined [[OpPlan]] types, one per `Done.Operations` entry, in
+ * order — never dereferenced as a value, same convention as [[OpPlan]] itself.
  */
 sealed trait Plans[T]:
   type Underlying <: Tuple

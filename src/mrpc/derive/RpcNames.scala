@@ -5,26 +5,21 @@ import made.*
 import scala.quoted.*
 
 /**
- * Whole-trait resolved RPC names lifted to the type level: `RpcNames[T].Names` is a tuple of singleton
- * string types — one per operation, in `Done.Operations` order — equal to [[RpcNames.deriveImpl]]'s
- * result. `names` is the same tuple as a runtime value.
+ * Whole-trait resolved RPC names lifted to the type level: `RpcNames[T].Underlying` is a tuple of
+ * singleton string types, one per operation, in `Done.Operations` order.
  *
- * Deliberately NOT a per-op typeclass derived independently for each operation and folded via
- * `compiletime.summonAll[Tuple.Map[Done.Operations, RpcName]]`: that shape pushes each op through
- * `Tuple.Map`'s per-element type-variable inference, which drops any `MetaAnnotation` the op carries
- * (e.g. `@multi`) — annotations don't survive being abstracted into a generic type variable. Instead
- * `RpcNames` walks `Done.Operations` reflectively in ONE PASS (annotations stay intact in `TypeRepr`),
- * reads `@rpcName`/`@rpcNamePrefix` terms and computes overload suffixes value-side (see `baseName`/
- * `applyPrefix`/`overloadSuffix` below), then EMITS the resolved names as types — which is exactly what
- * `Tuple.Map`/match types cannot do. **Annotation-proof** by construction.
+ * Deliberately NOT a per-op typeclass folded via `compiletime.summonAll[Tuple.Map[Done.Operations,
+ * RpcName]]`: `Tuple.Map`'s per-element type-variable inference drops any `MetaAnnotation` the op
+ * carries (e.g. `@multi`) before a per-op derivation could read it. Instead `deriveImpl` walks
+ * `Done.Operations` reflectively in one pass — annotations stay intact in `TypeRepr` — resolves
+ * `@rpcName`/`@rpcNamePrefix` and overload suffixes value-side, then emits the resolved names as types.
  */
 sealed trait RpcNames[T]:
   type Underlying <: Tuple
   given Underlying containsOnly String = containsOnly.refl
 
 object RpcNames:
-  
-  // todo: maybe not use implciit
+
   transparent inline given derived[T: Done.Of as done]: RpcNames[T] = ${
     deriveImpl[T, Tuple.Map[
       done.Operations,

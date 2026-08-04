@@ -3,35 +3,12 @@ package mrpc.derive
 import scala.quoted.*
 
 /**
- * One parameter's label, declared type, and raw per-param `Metadata` — a refined `Param` type,
- * mirroring made's own `InputElem` shape, rather than a value: it never leaves this package other than
- * to feed [[Matcher]]/[[MetadataDerivation]]'s own macro-time classification, so it never needs to
- * exist as a runtime value. Read back via `metadataEntries`, or directly via a
- * `case '[Param { type ParamType = t }] => ...` quote pattern at the (few) call sites that only need
- * one field once, same as [[OpPlan]] is read back via local quote-pattern matches in [[Matcher]] /
- * [[AsRawDerivation]] / [[AsRealDerivation]].
- */
-private[mrpc] trait Param:
-  type Label <: String
-  type ParamType
-  type Metadata <: Tuple
-
-object Param:
-  type Of[X] = Param { type ParamType = X }
-
-/**
- * Reflection helpers that read the type-level members of a refined `DoneOperation` (and its
- * `InputElem`s, projected into [[Param]]) — `Label`, `OutputType`, `InputElems`, and the method/param
- * `Metadata` chains.
+ * Reflection helpers over a refined `DoneOperation`'s type-level members (`InputElems`, `Metadata`
+ * chains) and its annotations. Annotation-CONTENT reading (`findAnnotation` and below) needs
+ * `quotes.reflect`: an annotation's constructor arguments are term-level data with no quote-pattern
+ * shortcut (mirrors made's `getAnnotationImpl`).
  *
- * Member reads (`labelOf`, `outputType`, ...) go through plain quote-pattern matching on a structural
- * refinement (`case '[DoneOperation { type Label = l }] => Type.of[l]`) — ordinary quotes/splices, no
- * `quotes.reflect` symbol lookup by name. Only annotation-CONTENT reading (`findAnnotation` and below)
- * still needs `quotes.reflect`: an annotation's constructor arguments are term-level data (mirrors
- * made's `getAnnotationImpl`, extensions.scala), which has no quote-pattern shortcut.
- *
- * Widened to `private[mrpc]` because it is the shared reflection reused by BOTH the engine and
- * metadata materialization — one Done-walk path, no fork.
+ * `private[mrpc]`: shared by both the engine and metadata materialization, one Done-walk path.
  */
 private[mrpc] object OpReflect:
 
