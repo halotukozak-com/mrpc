@@ -62,11 +62,16 @@ private[mrpc] object MetadataDerivation:
       def operations: Ops
 
     object Trait:
-      def apply[names <: Tuple](ops: Tuple)(using ops.type containsOnly DoneOperation, names containsOnly String)
-        : Trait { type Ops = ops.type; type Names = names } = new Trait:
+      // `ops` MUST be a genuine type parameter (not a bare `Tuple`-typed value param with `.type`
+      // tacked on the result) — a value param declared as plain `Tuple` widens away the caller's
+      // per-op refined types (and with them, each op's captured `Metadata`) at the parameter
+      // boundary; `ops.type` inside the return type then just resolves back to that widened `Tuple`.
+      // A type parameter, inferred from the argument's OWN static type, preserves it end-to-end.
+      def apply[ops <: Tuple, names <: Tuple](ops0: ops)(using ops containsOnly DoneOperation, names containsOnly String)
+        : Trait { type Ops = ops; type Names = names } = new Trait:
         override type Names = names
-        override type Ops = ops.type
-        override def operations: Ops = ops.asInstanceOf[Ops]
+        override type Ops = ops
+        override def operations: Ops = ops0
 
     /** A single RPC method/op (its refined `DoneOperation` type + resolved rpcName). */
     sealed abstract class Method extends Context:
@@ -75,12 +80,14 @@ private[mrpc] object MetadataDerivation:
       val op: Op
 
     object Method:
-      def apply[name <: String](operation: DoneOperation): Method { type Op = operation.type; type Name = name } =
+      // Same reasoning as `Trait.apply`: `operation` must be typed as the type parameter `opT`, not
+      // the `DoneOperation` supertype, or its real refined type (and captured `Metadata`) is lost.
+      def apply[name <: String, opT <: DoneOperation](operation: opT): Method { type Op = opT; type Name = name } =
         new Method:
-          override type Op = operation.type
+          override type Op = opT
           override type Name = name
 
-          val op: operation.type = operation
+          val op: opT = operation
 
     /** A single RPC parameter (a refined [[Param]] type). */
     sealed abstract class Param extends Context:
@@ -89,19 +96,20 @@ private[mrpc] object MetadataDerivation:
       val underlying: P
 
     object Param:
-      def apply(p: InputElem): Param { type P = p.type } = new Param:
-        override type P = p.type
-        override val underlying: p.type = p
+      // Same reasoning again: `p` must be typed as the type parameter `pT`, not `InputElem`.
+      def apply[pT <: InputElem](p: pT): Param { type P = pT } = new Param:
+        override type P = pT
+        override val underlying: pT = p
 
-  inline def impl[M[_], Real, Names <: Tuple](
-    operations: Tuple,
+  inline def impl[M[_], Real, Names <: Tuple, Ops <: Tuple](
+    operations: Ops,
   )(using
-    operations.type containsOnly DoneOperation,
+    Ops containsOnly DoneOperation,
     Names containsOnly String,
   )(using
     made: Made.Of[M[Real]],
   ): M[Real] =
-    val ctx = Context.Trait[Names](operations)
+    val ctx = Context.Trait[Ops, Names](operations)
     buildValue[M[Real]](using made, ctx)
 
   inline private def buildValue[M: Made.Of as made](using Context): M =
@@ -198,12 +206,17 @@ private[mrpc] object MetadataDerivation:
    *   - `@multi` / slot `List[A]`      -> ALL matching annotations on the symbol (the mrpc-owned
    *                                      tuple walk: collect every `AnnotatedType(_, a)` with `a.tpe <:< A`).
    */
-  inline private def reifyAnnot[Param](arity: SlotArity)(using Context): Any =
-    def allTerms[A]: List[A] = inline ctx match
-      case ctx: Context.Method => getAllAnnotations(ctx.op)(using containsOnly.refl)[A & Annotation]
-      case ctx: Context.Param => getAllAnnotations(ctx.underlying)(using containsOnly.refl)[A & Annotation]
-      case _: Context.Trait => compiletime.error("@reifyAnnot is not valid at the trait level")
+  // Pulled out of `reifyAnnot` (rather than a locally-nested `def`) for two reasons: nested `inline`
+  // methods aren't supported, and — more importantly — `ctx.op`/`ctx.underlying`'s real refined type
+  // (carrying the actual captured `Metadata`) is only visible to `getAllAnnotations` when THIS match
+  // is itself `inline` in a context where `ctx` hasn't already been widened to the bare `Context`
+  // supertype by an intervening non-inline call frame.
+  inline private def allTerms[A](using Context): List[A] = inline ctx match
+    case ctx: Context.Method => getAllAnnotations(ctx.op)(using containsOnly.refl)[A & Annotation]
+    case ctx: Context.Param => getAllAnnotations(ctx.underlying)(using containsOnly.refl)[A & Annotation]
+    case _: Context.Trait => compiletime.error("@reifyAnnot is not valid at the trait level")
 
+  inline private def reifyAnnot[Param](arity: SlotArity)(using Context): Any =
     // Resolve the slot's annotation element type from its declared shape (List[A]/Option[A]/A),
     // cross-checked against the steering arity marker.
     inline (arity, compiletime.erasedValue[Param]) match
@@ -245,7 +258,7 @@ private[mrpc] object MetadataDerivation:
         val head = acc231.head.asInstanceOf[head & DoneOperation]
         val tail = acc231.tail.asInstanceOf[tail]
 
-        buildElem[e, head.Type](using Context.Method[name & String](head)) *: buildAllElems[e, Tuple.Tail[Names]](tail)
+        buildElem[e, head.Type](using Context.Method[name & String, head & DoneOperation](head)) *: buildAllElems[e, Tuple.Tail[Names]](tail)
 
   inline private def buildAllElems2[e](acc238: Tuple): Tuple = inline acc238 match
     case _: EmptyTuple => EmptyTuple
