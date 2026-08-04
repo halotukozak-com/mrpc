@@ -37,10 +37,11 @@ object AsRawDerivation:
    * `fire`/`call`/`get` bodies below — unlike three independent macro entries, which would each
    * re-derive them.
    */
-  inline private def buildRawRpc[Raw, Real: {Done.Of as done}, Plans <: Tuple](api: Real)(
-    using Plans containsOnly OpPlan
-  )(using ec: ExecutionContext)
-    : RawRpc[Raw] =
+  inline private def buildRawRpc[Raw, Real: {Done.Of as done}, Plans <: Tuple](
+    api: Real,
+  )(using Plans containsOnly OpPlan,
+  )(using ec: ExecutionContext,
+  ): RawRpc[Raw] =
     ${ buildRawRpcImpl[Raw, Real, Plans]('api, 'done, 'ec) }
 
   /**
@@ -89,8 +90,9 @@ object AsRawDerivation:
         case '[{ type ArityInfo = ArityTag.Fire }] => true
         case _ => false,
     )
-    matchOnName[Raw, Unit](inv, arms, '{ () }) { (opType, index) =>
-      '{ ${ invokeOp[Raw, Real, Any](api, inv, opType, index, done) }: Unit }
+    matchOnName[Raw, Unit](inv, arms, '{ () }) { [op <: OpPlan] => index =>
+      val result = invokeOp[Raw, Real, Any, op](api, inv, index, done)
+      '{ $result: Unit }
     }
 
   private def callBody[Raw: Type, Real: Type, Plans <: Tuple: Type](
@@ -102,16 +104,14 @@ object AsRawDerivation:
   ): Expr[Future[Raw]] =
     val plans = TupleTraverse.traverseTuple[Plans, OpPlan]
     val arms = plans.zipWithIndex.filter((opType, _) =>
-      (opType.runtimeChecked match
-        case '[OpPlan { type ArityInfo = a }] => Type.of[a]
-      ) match
-        case '[ArityTag.CallOf[?]] => true
+      opType match
+        case '[OpPlan { type ArityInfo = ArityTag.CallOf[?] }] => true
         case _ => false,
     )
-    matchOnName[Raw, Future[Raw]](inv, arms, reject(inv)) { (opType, index) =>
-      opType match
+    matchOnName[Raw, Future[Raw]](inv, arms, reject(inv)) { [op <: OpPlan] => index =>
+      Type.of[op] match
         case '[{ type ArityInfo = ArityTag.CallOf[r] }] =>
-          val resultExpr = invokeOp[Raw, Real, Future[r]](api, inv, opType, index, done)
+          val resultExpr = invokeOp[Raw, Real, Future[r], op](api, inv, index, done)
           // Compose the leaf result encoder over Future via `forFuture`, threading the
           // companion-supplied ExecutionContext — never a global one. The encoder is resolved in
           // the generated code via `summonInline` (which reports a missing `AsRaw[Raw, r]` itself).
@@ -132,15 +132,13 @@ object AsRawDerivation:
     val plans = TupleTraverse.traverseTuple[Plans, OpPlan]
     val arms = plans.zipWithIndex.filter((opType, _) =>
       opType match
-        case '[OpPlan { type ArityInfo = a }] =>
-          Type.of[a] match
-            case '[ArityTag.GetOf[?]] => true
-            case _ => false,
+        case '[OpPlan { type ArityInfo = ArityTag.GetOf[?] }] => true
+        case _ => false,
     )
-    matchOnName[Raw, RawRpc[Raw]](inv, arms, reject(inv)) { (opType, index) =>
-      opType match
+    matchOnName[Raw, RawRpc[Raw]](inv, arms, reject(inv)) { [op <: OpPlan] => index =>
+      Type.of[op] match
         case '[{ type ArityInfo = ArityTag.GetOf[sub] }] =>
-          val subInstance = invokeOp[Raw, Real, sub](api, inv, opType, index, done)
+          val subInstance = invokeOp[Raw, Real, sub, op](api, inv, index, done)
           '{
             AsRaw
               .makeLazy[RawRpc[Raw], sub](compiletime.summonInline[AsRaw[RawRpc[Raw], sub]])
@@ -161,7 +159,7 @@ object AsRawDerivation:
     plans: List[(Type[? <: OpPlan], Int)],
     reject: Expr[Res],
   )(
-    arm: (Type[? <: OpPlan], Int) => Expr[Res],
+    arm: [T <: OpPlan: Type] => Int => Expr[Res],
   )(using Quotes,
   ): Expr[Res] =
     import quotes.reflect.*
@@ -170,14 +168,14 @@ object AsRawDerivation:
       val rpcName = opType.runtimeChecked match
         case '[type n <: String; OpPlan { type RpcName = n }] =>
           Type.valueOfConstant[n].getOrElse(report.errorAndAbort("RpcName is not a string literal")).toString
-      CaseDef(Literal(StringConstant(rpcName)), None, arm(opType, index).asTerm)
+      CaseDef(Literal(StringConstant(rpcName)), None, arm(index)(using opType).asTerm)
     }
     val default = CaseDef(Wildcard(), None, reject.asTerm)
     Match(scrutinee, caseDefs :+ default).asExprOf[Res]
 
   /** Each parameter's declared `ParamType`, in the op's declaration order, off `plan`'s `Params`. */
-  private def paramTypesOf(plan: Type[?])(using Quotes): List[Type[?]] =
-    plan.runtimeChecked match
+  private def paramTypesOf[Op <: OpPlan: Type](using Quotes): List[Type[?]] =
+    Type.of[Op] match
       case '[type ps <: Tuple; OpPlan { type Params = ps }] =>
         TupleTraverse.traverseTuple[ps, ParamPlan].map { case '[ParamPlan { type ParamType = t }] => Type.of[t] }
 
@@ -189,17 +187,16 @@ object AsRawDerivation:
    * `inv.args` is nested per parameter list (`List[List[Raw]]`); it is flattened in `InputElems`
    * order before decoding, matching made's flattened `Args` contract.
    */
-  private def invokeOp[Raw: Type, Real: Type, R: Type](
+  private def invokeOp[Raw: Type, Real: Type, R: Type, Op <: OpPlan: Type](
     api: Expr[Real],
     inv: Expr[RawInvocation[Raw]],
-    opType: Type[? <: OpPlan],
     index: Int,
     done: Expr[Done.Of[Real]],
   )(using quotes: Quotes,
   ): Expr[R] =
     val flatArgs = '{ ${ inv }.args.flatten }
 
-    val decodedArgs: List[Expr[?]] = paramTypesOf(opType).zipWithIndex.map:
+    val decodedArgs: List[Expr[?]] = paramTypesOf[Op].zipWithIndex.map:
       case ('[t], i) =>
         '{ scala.compiletime.summonInline[AsReal[Raw, t]].asReal($flatArgs(${ Expr(i) })) }
       case (_, _) => ???
@@ -207,7 +204,7 @@ object AsRawDerivation:
     // `opType`'s `OpType` member IS the underlying `DoneOperation` — no need to re-walk `done`'s
     // `Operations` tuple by index to recover it. The final `.asInstanceOf[R]` below makes an
     // `OutputType`/`R` correspondence unnecessary here too.
-    val operation: Expr[? <: DoneOperation { type OuterType = Real }] = opType match
+    val operation: Expr[? <: DoneOperation { type OuterType = Real }] = Type.of[Op] match
       case '[type op <: DoneOperation { type OuterType = Real }; OpPlan { type OpType = op }] =>
         '{ $done.operations(${ Expr(index) }).asInstanceOf[op] }
 
