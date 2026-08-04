@@ -102,19 +102,20 @@ object AsRawDerivation:
     done: Expr[Done.Of[Real]],
   )(using Quotes,
   ): Expr[Unit] =
-    val plans = TupleTraverse.traverseTuple[Plans, OpPlan]
+    // Walks `Plans` directly via quote-pattern recursion — `h` is bound fresh at each step (with its
+    // OWN precise refined type, `Type[h]` given automatically by the pattern) rather than first
+    // collected into a `List[Type[? <: OpPlan]]` and re-matched afterward, so it never widens to an
+    // unnamed wildcard and never needs an `op.Underlying`-style workaround to recover it.
+    def arms[Tup <: Tuple: Type](index: Int): List[Expr[() => Unit]] = Type.of[Tup] match
+      case '[EmptyTuple] => Nil
+      case '[type h <: OpPlan; h *: t] =>
+        val arm = Type.of[h] match
+          case '[OpPlan { type ArityInfo = ArityTag.Fire }] =>
+            '{ () => ${ invokeOp[Raw, Real, Any, h](api, inv, index, done) }: Unit }
+          case _ => '{ () => ${ reject(inv) } }
+        arm :: arms[t](index + 1)
 
-    val fireByIndex: Map[Int, Expr[() => Unit]] =
-      plans.zipWithIndex.collect { case (op @ '[{ type ArityInfo = ArityTag.Fire }], index) =>
-        given Type[op.Underlying] = op
-        val underlying = invokeOp[Raw, Real, Any, op.Underlying](api, inv, index, done)
-        index -> '{ () => $underlying: Unit }
-      }.toMap
-
-    val values =
-      Expr.ofRefinedTuple(plans.indices.toList.map { index =>
-        fireByIndex.getOrElse(index, '{ () => ${ reject(inv) } })
-      })
+    val values = Expr.ofRefinedTuple(arms[Plans](0))
 
     values match
       case '{ type values <: Tuple; $values: values } =>
@@ -135,22 +136,19 @@ object AsRawDerivation:
     done: Expr[Done.Of[Real]],
   )(using Quotes,
   ): Expr[Future[Raw]] =
-    val plans = TupleTraverse.traverseTuple[Plans, OpPlan]
+    def arms[Tup <: Tuple: Type](index: Int): List[Expr[() => Future[Raw]]] = Type.of[Tup] match
+      case '[EmptyTuple] => Nil
+      case '[type h <: OpPlan; h *: t] =>
+        val arm = Type.of[h] match
+          case '[OpPlan { type ArityInfo = ArityTag.CallOf[r] }] =>
+            '{ () =>
+              val futureEncoder = AsRaw.forFuture[Raw, r](using scala.compiletime.summonInline[AsRaw[Raw, r]], $ec)
+              futureEncoder.asRaw(${ invokeOp[Raw, Real, Future[r], h](api, inv, index, done) })
+            }
+          case _ => '{ () => ${ reject(inv) } }
+        arm :: arms[t](index + 1)
 
-    val callByIndex: Map[Int, Expr[() => Future[Raw]]] =
-      plans.zipWithIndex.collect { case (op @ '[OpPlan { type ArityInfo = ArityTag.CallOf[r] }], index) =>
-        given Type[op.Underlying] = op
-        val underlying = invokeOp[Raw, Real, Future[r], op.Underlying](api, inv, index, done)
-        index -> '{ () =>
-          val futureEncoder = AsRaw.forFuture[Raw, r](using scala.compiletime.summonInline[AsRaw[Raw, r]], $ec)
-          futureEncoder.asRaw($underlying)
-        }
-      }.toMap
-
-    val values =
-      Expr.ofRefinedTuple(plans.indices.toList.map { index =>
-        callByIndex.getOrElse(index, '{ () => ${ reject(inv) } })
-      })
+    val values = Expr.ofRefinedTuple(arms[Plans](0))
 
     values match
       case '{ type values <: Tuple; $values: values } =>
@@ -170,21 +168,20 @@ object AsRawDerivation:
     done: Expr[Done.Of[Real]],
   )(using Quotes,
   ): Expr[RawRpc[Raw]] =
-    val plans = TupleTraverse.traverseTuple[Plans, OpPlan]
+    def arms[Tup <: Tuple: Type](index: Int): List[Expr[() => RawRpc[Raw]]] = Type.of[Tup] match
+      case '[EmptyTuple] => Nil
+      case '[type h <: OpPlan; h *: t] =>
+        val arm = Type.of[h] match
+          case '[OpPlan { type ArityInfo = ArityTag.GetOf[sub] }] =>
+            '{ () =>
+              AsRaw
+                .makeLazy[RawRpc[Raw], sub](compiletime.summonInline[AsRaw[RawRpc[Raw], sub]])
+                .asRaw(${ invokeOp[Raw, Real, sub, h](api, inv, index, done) })
+            }
+          case _ => '{ () => ${ reject(inv) } }
+        arm :: arms[t](index + 1)
 
-    val getByIndex: Map[Int, Expr[() => RawRpc[Raw]]] =
-      plans.zipWithIndex.collect { case (op @ '[{ type ArityInfo = ArityTag.GetOf[sub] }], index) =>
-        given Type[op.Underlying] = op
-        val underlying = invokeOp[Raw, Real, sub, op.Underlying](api, inv, index, done)
-        index -> '{ () =>
-          AsRaw.makeLazy[RawRpc[Raw], sub](compiletime.summonInline[AsRaw[RawRpc[Raw], sub]]).asRaw($underlying)
-        }
-      }.toMap
-
-    val values =
-      Expr.ofRefinedTuple(plans.indices.toList.map { index =>
-        getByIndex.getOrElse(index, '{ () => ${ reject(inv) } })
-      })
+    val values = Expr.ofRefinedTuple(arms[Plans](0))
 
     values match
       case '{ type values <: Tuple; $values: values } =>
