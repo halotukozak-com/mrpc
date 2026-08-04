@@ -2,30 +2,21 @@ package mrpc
 package derive
 
 import mrpc.conv.{AsRaw, AsReal}
+import mrpc.derive.OpPlan.ArgsOf
 import mrpc.raw.{RawInvocation, RawRpc}
 
 import scala.concurrent.{ExecutionContext, Future}
 import scala.quoted.*
 
-sealed trait Handler[Raw, Plan <: OpPlan]
+opaque type Handler[Raw, Plan <: OpPlan] = EmptyHandler[Raw, Plan] | NonEmptyHandler[Raw, Plan]
 
-sealed trait EmptyHandler[Raw, Plan <: OpPlan] extends Handler[Raw, Plan], (() => Any)
-sealed trait NonEmptyHandler[Raw, Plan <: OpPlan] extends Handler[Raw, Plan], ((OpPlan.ArgsOf[Plan] & Tuple) => Any)
+opaque type EmptyHandler[Raw, Plan <: OpPlan] = () => Any
+opaque type NonEmptyHandler[Raw, Plan <: OpPlan] = ArgsOf[Plan] => Any
+
+type ArgsOf[Plan <: OpPlan] = Plan match
+  case ([args0] =>> OpPlan { type Args = args0 })[args] => args
 
 object Handler:
-
-  /**
-   * Factored out of the `given` below (an ordinary, non-`inline` method) so the anonymous
-   * `EmptyHandler`/`NonEmptyHandler` class bodies are compiled once, generically — not duplicated at
-   * every inline site the `given` expands to.
-   */
-  private def emptyHandler[Raw, Plan <: OpPlan](body: () => Any): Handler[Raw, Plan] =
-    new EmptyHandler[Raw, Plan]:
-      override def apply(): Any = body()
-
-  private def nonEmptyHandler[Raw, Plan <: OpPlan](body: (OpPlan.ArgsOf[Plan] & Tuple) => Any): Handler[Raw, Plan] =
-    new NonEmptyHandler[Raw, Plan]:
-      override def apply(args: OpPlan.ArgsOf[Plan] & Tuple): Any = body(args)
 
   /**
    * Named (not anonymous) so callers that already hold a concrete `Plan` — [[AsRealDerivation]]'s
@@ -43,13 +34,10 @@ object Handler:
           case op =>
             inline compiletime.erasedValue[plan.Args] match
               case _: EmptyTuple =>
-                emptyHandler[Raw, Plan] { () =>
-                  handlerBody[Raw, Plan, plan.Args, plan.RpcName, op.ParamLists](EmptyTuple.asInstanceOf[plan.Args])
-                }
+                () => handlerBody[Raw, Plan, plan.Args, plan.RpcName, op.ParamLists](EmptyTuple.asInstanceOf[plan.Args])
               case _ =>
-                nonEmptyHandler[Raw, Plan] { args =>
+                (args: ArgsOf[Plan]) =>
                   handlerBody[Raw, Plan, plan.Args, plan.RpcName, op.ParamLists](args.asInstanceOf[plan.Args])
-                }
 
   inline def handlerBody[Raw: RawRpc as raw, Plan <: OpPlan, Args <: Tuple, Name <: String, Lists <: Tuple](
     tup: Args,

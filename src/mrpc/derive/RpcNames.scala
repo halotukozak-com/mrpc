@@ -23,6 +23,8 @@ sealed trait RpcNames[T]:
   given Underlying containsOnly String = containsOnly.refl
 
 object RpcNames:
+  
+  // todo: maybe not use implciit
   transparent inline given derived[T: Done.Of as done]: RpcNames[T] = ${
     deriveImpl[T, Tuple.Map[
       done.Operations,
