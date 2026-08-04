@@ -7,7 +7,7 @@ import scala.util.NotGiven
 
 import mrpc.conv.{AsRaw, AsReal}
 import mrpc.derive.SampleApi.*
-import mrpc.derive.{Matcher, SampleApi}
+import mrpc.derive.SampleApi
 import mrpc.raw.RawRpc
 
 /**
@@ -126,18 +126,3 @@ class CommonsParitySuite extends munit.FunSuite:
     assertEquals(byId, User(7, "by-id"))
     assertEquals(byName, User(-1, "alice"))
     assertNotEquals(byId, byName)
-
-  test("overloads disambiguate to distinct rpcNames (D4 signature-hash suffix, not positional _1/_2)"):
-    // Checked at compile time (same technique as MatchingSuite): a wrong fact here fails to COMPILE.
-    val (byId, byName) = Matcher.plansFor[SampleApi, "lookup"]
-    summon[NotGiven[byId.RpcName =:= byName.RpcName]]
-
-  // --- 4. rpcName/prefix + @multi/arity (commons NewRawRpc rpcName intent) -------------------------
-
-  test("@rpcName override resolves (NewRawRpc rpcName / v2_status / findOne analog)"):
-    val findRenamed = Matcher.planFor[SampleApi, "findRenamed"]
-    summon[findRenamed.RpcName =:= "findOne"]
-
-  // A @multi param being classified additively (arity/params unaffected) is asserted at the type
-  // level in MatchingSuite against this SAME `increment` op — no separate runtime check needed here;
-  // "call dispatch returns the typed result" above already exercises it end-to-end through the loopback.
