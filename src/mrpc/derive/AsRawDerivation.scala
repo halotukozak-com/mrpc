@@ -73,11 +73,11 @@ object AsRawDerivation:
   transparent inline private def fireArms[Raw, Real: Done.Of, Acc <: Tuple](
     api: Real,
   ): Tuple = arms[Raw, Real, Acc, [X] =>> Unit](
-    [A <: ArityTag, Op <: OpPlan] =>
+    [A <: ArityTag, Op <: OpPlan, Args <: Tuple] =>
       index =>
         inline compiletime.erasedValue[A] match
           case _: ArityTag.Fire =>
-            (inv: RawInvocation[Raw]) => invoke[Raw, Real, Any, Op](api, inv, index): Unit
+            (inv: RawInvocation[Raw]) => invoke[Raw, Real, Any, Op, Args](api, inv, index): Unit
           case _ => (inv: RawInvocation[Raw]) => reject(inv)
     ,
     api,
@@ -107,7 +107,7 @@ object AsRawDerivation:
   )(inv)
 
   transparent inline private def arms[Raw, Real: Done.Of, Acc <: Tuple, F[_ <: Raw]](
-    inline f: [A <: ArityTag, Op <: OpPlan] => Int => RawInvocation[Raw] => F[Raw],
+    inline f: [A <: ArityTag, Op <: OpPlan, Args <: Tuple] => Int => RawInvocation[Raw] => F[Raw],
     api: Real,
   )(
     index: Int,
@@ -117,7 +117,7 @@ object AsRawDerivation:
       case _: (h *: t) =>
         val arm = inline compiletime.erasedValue[h] match
           case op: OpPlan =>
-            f[op.ArityInfo, op.type](index)
+            f[op.ArityInfo, op.type, op.Args](index)
         arms[Raw, Real, t, F](f, api)(index + 1).realCons(arm)
 
   transparent inline private def callArms[Raw, Real: Done.Of, Acc <: Tuple](
@@ -125,13 +125,13 @@ object AsRawDerivation:
   )(using ec: ExecutionContext,
   ): Tuple =
     arms[Raw, Real, Acc, Future](
-      [A <: ArityTag, Op <: OpPlan] =>
+      [A <: ArityTag, Op <: OpPlan, Args <: Tuple] =>
         index =>
           inline compiletime.erasedValue[A] match
             case _: ArityTag.Call[r] =>
               (inv: RawInvocation[Raw]) =>
                 val futureEncoder = AsRaw.forFuture[Raw, r](using scala.compiletime.summonInline[AsRaw[Raw, r]], ec)
-                futureEncoder.asRaw(invoke[Raw, Real, Future[r], Op](api, inv, index))
+                futureEncoder.asRaw(invoke[Raw, Real, Future[r], Op, Args](api, inv, index))
             case _ => (inv: RawInvocation[Raw]) => reject(inv)
       ,
       api,
@@ -150,14 +150,14 @@ object AsRawDerivation:
     api: Real,
   ): Tuple =
     arms[Raw, Real, Acc, RawRpc](
-      [A <: ArityTag, Op <: OpPlan] =>
+      [A <: ArityTag, Op <: OpPlan, Args <: Tuple] =>
         index =>
           inline compiletime.erasedValue[A] match
             case _: ArityTag.Get[sub] =>
               (inv: RawInvocation[Raw]) =>
                 AsRaw
                   .makeLazy[RawRpc[Raw], sub](compiletime.summonInline[AsRaw[RawRpc[Raw], sub]])
-                  .asRaw(invoke[Raw, Real, sub, Op](api, inv, index))
+                  .asRaw(invoke[Raw, Real, sub, Op, Args](api, inv, index))
             case _ => (inv: RawInvocation[Raw]) => reject(inv)
       ,
       api,
@@ -174,46 +174,20 @@ object AsRawDerivation:
 
   // --- shared helpers ---
 
-  /** Each parameter's declared `ParamType`, in the op's declaration order, off `plan`'s `Params`. */
-  private def paramTypesOf[Plan <: OpPlan: Type](using Quotes): List[Type[?]] =
-    Type.of[Plan] match
-      case '[type ps <: Tuple; OpPlan { type Params = ps }] =>
-        TupleTraverse.traverseTuple[ps, ParamPlan].map { case '[ParamPlan { type ParamType = t }] => Type.of[t] }
-
-  inline private def invoke[Raw, Real: Done.Of as done, R, Plan <: OpPlan](
+  inline private def invoke[Raw, Real: Done.Of as done, R, Plan <: OpPlan, Args <: Tuple](
     api: Real,
     inv: RawInvocation[Raw],
     index: Int,
-  ): R = ${ invokeImpl[Raw, Real, R, Plan]('api, 'inv, 'index, 'done) }
+  ): R =
+    val operation = done.operations(index).asInstanceOf[DoneOperation { type OuterType = Real }]
+    val argsTuple = decodedArgs[Raw, Args](inv.args.flatten)(0)
+    done.invoke(operation, api, argsTuple.asInstanceOf[operation.Args]).asInstanceOf[R]
 
-  private def invokeImpl[Raw: Type, Real: Type, R: Type, Plan <: OpPlan: Type](
-    api: Expr[Real],
-    inv: Expr[RawInvocation[Raw]],
-    index: Expr[Int],
-    done: Expr[Done.Of[Real]],
-  )(using quotes: Quotes,
-  ): Expr[R] =
-    val flatArgs = '{ ${ inv }.args.flatten }
-
-    val decodedArgs: List[Expr[?]] = paramTypesOf[Plan].zipWithIndex.map:
-      case ('[t], i) =>
-        '{ scala.compiletime.summonInline[AsReal[Raw, t]].asReal($flatArgs(${ Expr(i) })) }
-      case (_, _) => ???
-
-    // `Plan`'s `OpType` member IS the underlying `DoneOperation` — no need to re-walk `done`'s
-    // `Operations` tuple by index to recover it. The final `.asInstanceOf[R]` below makes an
-    // `OutputType`/`R` correspondence unnecessary here too.
-    val operation: Expr[? <: DoneOperation { type OuterType = Real }] = Type.of[Plan] match
-      case '[type op <: DoneOperation { type OuterType = Real }; OpPlan { type OpType = op }] =>
-        '{ $done.operations($index).asInstanceOf[op] }
-
-    val argsTuple = Expr.ofRefinedTuple(decodedArgs)
-
-    val res = '{
-      val op = $operation
-      $done.invoke(op, $api, $argsTuple.asInstanceOf[op.Args])
-    }
-    '{ $res.asInstanceOf[R] }
+  private transparent inline def decodedArgs[Raw, Acc <: Tuple](flatArgs: List[Raw])(i: Int): Tuple =
+    inline compiletime.erasedValue[Acc] match
+      case _: EmptyTuple => EmptyTuple
+      case _: (h *: tail) =>
+        scala.compiletime.summonInline[AsReal[Raw, h]].asReal(flatArgs(i)) *: decodedArgs[Raw, tail](flatArgs)(i + 1)
 
   private def reject(inv: RawInvocation[?]): Nothing =
     throw new IllegalArgumentException("unknown rpc name: " + inv.rpcName)
