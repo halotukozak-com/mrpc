@@ -1,7 +1,6 @@
 package mrpc
 package derive
 
-import made.DoneOperation
 import mrpc.conv.{AsRaw, AsReal}
 import mrpc.raw.{RawInvocation, RawRpc}
 

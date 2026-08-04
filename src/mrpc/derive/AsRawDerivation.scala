@@ -5,7 +5,6 @@ import made.{containsOnly, Done, DoneOperation}
 import mrpc.conv.{AsRaw, AsReal}
 import mrpc.raw.{RawInvocation, RawRpc}
 
-import scala.annotation.switch
 import scala.concurrent.{ExecutionContext, Future}
 import scala.quoted.*
 
@@ -82,29 +81,37 @@ object AsRawDerivation:
     done: Expr[Done.Of[Real]],
   )(using Quotes,
   ): Expr[Unit] =
-    import quotes.reflect.*
     val plans = TupleTraverse.traverseTuple[Plans, OpPlan]
-    // `zipWithIndex` HERE (not upfront in some shared pre-computed list) is what makes `index` mean
-    // "position in `Done.Operations`": the filter below drops entries, so an index taken from the
-    // FILTERED list would point at the wrong operation once `invokeOp` uses it to read
-    // `done.operations(index)`.
-    val arms = plans.zipWithIndex.filter((opType, _) =>
-      opType match
-        case '[{ type ArityInfo = ArityTag.Fire }] => true
-        case _ => false,
-    )
-    val scrutinee = '{ ${ inv }.rpcName: @switch }.asTerm
-    val caseDefs = arms.map { (opType, index) =>
-      val rpcName = opType.runtimeChecked match
-        case '[type n <: String; OpPlan { type RpcName = n }] =>
-          Type.valueOfConstant[n].getOrElse(report.errorAndAbort("RpcName is not a string literal")).toString
-      val armExpr = opType match
-        case '[type op <: OpPlan; op] =>
-          '{ ${ invokeOp[Raw, Real, Any, op](api, inv, index, done) }: Unit }
-      CaseDef(Literal(StringConstant(rpcName)), None, armExpr.asTerm)
+
+    val fireArms = plans.zipWithIndex.collect { case (op @ '[{ type ArityInfo = ArityTag.Fire }], index) =>
+      (op, index)
     }
-    val default = CaseDef(Wildcard(), None, '{ () }.asTerm)
-    Match(scrutinee, caseDefs :+ default).asExprOf[Unit]
+
+    if fireArms.isEmpty then '{ () }
+    else
+      val names = TupleTraverse.foldTuple(fireArms.map((op, _) => op).collect {
+        case '[type n; OpPlan { type RpcName = n }] => Type.of[n]
+      })
+
+      val values =
+        Expr.ofRefinedTuple(fireArms.map { (op, index) =>
+          given Type[op.Underlying] = op
+          val underlying = invokeOp[Raw, Real, Any, op.Underlying](api, inv, index, done)
+          '{ () => $underlying: Unit }
+        })
+
+      (names, values) match
+        case ('[type names <: Tuple; names], '{ type values <: Tuple; $values: values }) =>
+          '{
+            ${
+              matchFromImpl[names, values](
+                '{ ${ inv }.rpcName },
+                '{ NamedTuple.build[names]()($values) },
+                '{ () => () }.asExprOf[Tuple.Union[values]],
+              ).asExprOf[() => Unit]
+            }()
+          }
+        case (_, _) => ???
 
   private def callBody[Raw: Type, Real: Type, Plans <: Tuple: Type](
     api: Expr[Real],
@@ -113,31 +120,41 @@ object AsRawDerivation:
     done: Expr[Done.Of[Real]],
   )(using Quotes,
   ): Expr[Future[Raw]] =
-    import quotes.reflect.*
     val plans = TupleTraverse.traverseTuple[Plans, OpPlan]
-    val arms = plans.zipWithIndex.filter((opType, _) =>
-      opType match
-        case '[OpPlan { type ArityInfo = ArityTag.CallOf[?] }] => true
-        case _ => false,
-    )
-    val scrutinee = '{ ${ inv }.rpcName: @switch }.asTerm
-    val caseDefs = arms.map { (opType, index) =>
-      val rpcName = opType.runtimeChecked match
-        case '[type n <: String; OpPlan { type RpcName = n }] =>
-          Type.valueOfConstant[n].getOrElse(report.errorAndAbort("RpcName is not a string literal")).toString
-      val armExpr = opType match
-        case '[type op <: OpPlan; op] =>
-          Type.of[op] match
-            case '[{ type ArityInfo = ArityTag.CallOf[r] }] =>
-              '{
-                val futureEncoder = AsRaw.forFuture[Raw, r](using scala.compiletime.summonInline[AsRaw[Raw, r]], $ec)
-                futureEncoder.asRaw(${ invokeOp[Raw, Real, Future[r], op](api, inv, index, done) })
-              }
-            case _ => reject(inv)
-      CaseDef(Literal(StringConstant(rpcName)), None, armExpr.asTerm)
+
+    val callArms = plans.zipWithIndex.collect {
+      case (op @ '[OpPlan { type ArityInfo = ArityTag.CallOf[?] }], index) => (op, index)
     }
-    val default = CaseDef(Wildcard(), None, reject(inv).asTerm)
-    Match(scrutinee, caseDefs :+ default).asExprOf[Future[Raw]]
+
+    val names = TupleTraverse.foldTuple(callArms.map((op, _) => op).collect {
+      case '[type n; OpPlan { type RpcName = n }] => Type.of[n]
+    })
+
+    val values =
+      Expr.ofRefinedTuple(callArms.map { (op, index) =>
+        given Type[op.Underlying] = op
+        Type.of[op.Underlying] match
+          case '[OpPlan { type ArityInfo = ArityTag.CallOf[r] }] =>
+            val underlying = invokeOp[Raw, Real, Future[r], op.Underlying](api, inv, index, done)
+            '{ () =>
+              val futureEncoder = AsRaw.forFuture[Raw, r](using scala.compiletime.summonInline[AsRaw[Raw, r]], $ec)
+              futureEncoder.asRaw($underlying)
+            }
+          case _ => '{ () => ${ reject(inv) } }
+      })
+
+    (names, values) match
+      case ('[type names <: Tuple; names], '{ type values <: Tuple; $values: values }) =>
+        '{
+          ${
+            matchFromImpl[names, values](
+              '{ ${ inv }.rpcName },
+              '{ NamedTuple.build[names]()($values) },
+              reject(inv),
+            ).asExprOf[() => Future[Raw]]
+          }()
+        }
+      case (_, _) => ???
 
   private def getBody[Raw: Type, Real: Type, Plans <: Tuple: Type](
     api: Expr[Real],
@@ -145,29 +162,36 @@ object AsRawDerivation:
     done: Expr[Done.Of[Real]],
   )(using Quotes,
   ): Expr[RawRpc[Raw]] =
-    import quotes.reflect.*
     val plans = TupleTraverse.traverseTuple[Plans, OpPlan]
 
-    val names = TupleTraverse.foldTuple(plans.collect { case '[type n <: String; OpPlan { type RpcName = n }] =>
-      Type.of[n]
+    val getArms = plans.zipWithIndex.collect { case (op @ '[{ type ArityInfo = ArityTag.GetOf[sub] }], index) =>
+      (op, index)
+    }
+
+    val names = TupleTraverse.foldTuple(getArms.map((op, _) => op).collect {
+      case '[type n; OpPlan { type RpcName = n }] => Type.of[n]
     })
 
     val values =
-      Expr.ofRefinedTuple(plans.zipWithIndex.collect { case (op @ '[{ type ArityInfo = ArityTag.GetOf[sub] }], index) =>
+      Expr.ofRefinedTuple(getArms.collect { case (op @ '[{ type ArityInfo = ArityTag.GetOf[sub] }], index) =>
         given Type[op.Underlying] = op
         val underlying = invokeOp[Raw, Real, sub, op.Underlying](api, inv, index, done)
-        '{
+        '{ () =>
           AsRaw.makeLazy[RawRpc[Raw], sub](compiletime.summonInline[AsRaw[RawRpc[Raw], sub]]).asRaw($underlying)
         }
       })
 
     (names, values) match
       case ('[type names <: Tuple; names], '{ type values <: Tuple; $values: values }) =>
-        matchFromImpl[names, values](
-          '{ ${ inv }.rpcName },
-          '{ NamedTuple.build[names]()($values) },
-          reject(inv),
-        ).asExprOf[mrpc.raw.RawRpc[Raw]]
+        '{
+          ${
+            matchFromImpl[names, values](
+              '{ ${ inv }.rpcName },
+              '{ NamedTuple.build[names]()($values) },
+              reject(inv),
+            ).asExprOf[() => RawRpc[Raw]]
+          }()
+        }
       case (_, _) => ???
 
   // --- shared helpers ---
