@@ -4,6 +4,7 @@ import made.{containsOnly, Done, DoneOperation}
 import mrpc.conv.{AsRaw, AsReal}
 import mrpc.raw.{RawInvocation, RawRpc}
 
+import scala.annotation.switch
 import scala.concurrent.{ExecutionContext, Future}
 import scala.quoted.*
 
@@ -91,8 +92,7 @@ object AsRawDerivation:
         case _ => false,
     )
     matchOnName[Raw, Unit](inv, arms, '{ () }) { [op <: OpPlan] => index =>
-      val result = invokeOp[Raw, Real, Any, op](api, inv, index, done)
-      '{ $result: Unit }
+      '{ ${ invokeOp[Raw, Real, Any, op](api, inv, index, done) }: Unit }
     }
 
   private def callBody[Raw: Type, Real: Type, Plans <: Tuple: Type](
@@ -111,14 +111,9 @@ object AsRawDerivation:
     matchOnName[Raw, Future[Raw]](inv, arms, reject(inv)) { [op <: OpPlan] => index =>
       Type.of[op] match
         case '[{ type ArityInfo = ArityTag.CallOf[r] }] =>
-          val resultExpr = invokeOp[Raw, Real, Future[r], op](api, inv, index, done)
-          // Compose the leaf result encoder over Future via `forFuture`, threading the
-          // companion-supplied ExecutionContext — never a global one. The encoder is resolved in
-          // the generated code via `summonInline` (which reports a missing `AsRaw[Raw, r]` itself).
           '{
-            val futureEncoder: AsRaw[Future[Raw], Future[r]] =
-              AsRaw.forFuture[Raw, r](using scala.compiletime.summonInline[AsRaw[Raw, r]], $ec)
-            futureEncoder.asRaw($resultExpr)
+            val futureEncoder = AsRaw.forFuture[Raw, r](using scala.compiletime.summonInline[AsRaw[Raw, r]], $ec)
+            futureEncoder.asRaw(${ invokeOp[Raw, Real, Future[r], op](api, inv, index, done) })
           }
         case _ => reject(inv)
     }
@@ -138,11 +133,10 @@ object AsRawDerivation:
     matchOnName[Raw, RawRpc[Raw]](inv, arms, reject(inv)) { [op <: OpPlan] => index =>
       Type.of[op] match
         case '[{ type ArityInfo = ArityTag.GetOf[sub] }] =>
-          val subInstance = invokeOp[Raw, Real, sub, op](api, inv, index, done)
           '{
             AsRaw
               .makeLazy[RawRpc[Raw], sub](compiletime.summonInline[AsRaw[RawRpc[Raw], sub]])
-              .asRaw($subInstance)
+              .asRaw(${ invokeOp[Raw, Real, sub, op](api, inv, index, done) })
           }
         case _ => reject(inv)
     }
@@ -163,7 +157,7 @@ object AsRawDerivation:
   )(using Quotes,
   ): Expr[Res] =
     import quotes.reflect.*
-    val scrutinee = '{ ${ inv }.rpcName }.asTerm
+    val scrutinee = '{ ${ inv }.rpcName: @switch }.asTerm
     val caseDefs = plans.map { (opType, index) =>
       val rpcName = opType.runtimeChecked match
         case '[type n <: String; OpPlan { type RpcName = n }] =>
