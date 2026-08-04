@@ -13,12 +13,12 @@ import scala.quoted.{Expr, Quotes, Type}
  * classify arity by quote-pattern-matching this type directly (`case '[ArityTag.Fire] => ...` /
  * `case '[ArityTag.CallOf[r]] => ...`) — there is no separate value-level enum to keep in sync with it.
  */
-private[derive] sealed trait ArityTag
+private[derive] sealed class ArityTag
 private[derive] object ArityTag:
-  sealed trait Fire extends ArityTag
-  sealed trait Call extends ArityTag:
+  sealed class Fire extends ArityTag
+  sealed class Call extends ArityTag:
     type Result
-  sealed trait Get extends ArityTag:
+  sealed class Get extends ArityTag:
     type Sub
 
   type CallOf[R] = Call { type Result = R }
@@ -172,7 +172,7 @@ object Plans:
   transparent inline def materialize[T: {Done.Of as done, RpcNames as names}]: Plans[T] =
     Plans(buildAll[Tuple.Zip[names.Underlying, done.Operations]])
 
-  private transparent inline def buildAll[Acc <: Tuple](
+  transparent inline private def buildAll[Acc <: Tuple](
     using Acc containsOnly (String, DoneOperation),
   ): Tuple = inline compiletime.erasedValue[Acc] match
     case _: EmptyTuple => EmptyTuple

@@ -4,6 +4,7 @@ package derive
 import scala.annotation.switch
 import scala.quoted.*
 
+//it could be done without macro, with inline if else, but @switch for performance
 inline def matchFrom[Names <: Tuple, Values <: Tuple](
   inline scrutinee: String,
   args: NamedTuple.NamedTuple[Names, Values],

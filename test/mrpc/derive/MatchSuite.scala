@@ -40,3 +40,4 @@ class MatchSuite extends munit.FunSuite:
     val args = (foo = 1, bar = "two")
     val result: Int | String = matchFrom("foo", args, reject = "fallback")
     assertEquals(result, 1)
+
