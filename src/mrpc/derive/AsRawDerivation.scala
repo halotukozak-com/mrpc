@@ -59,23 +59,44 @@ object AsRawDerivation:
       def call(invocation: RawInvocation[Raw]): Future[Raw] = callFn(invocation)
       def get(invocation: RawInvocation[Raw]): RawRpc[Raw] = getFn(invocation)
 
+  /**
+   * The `Names` shared across all three bodies below: every op's resolved `RpcName`, in `Plans`
+   * order — computed ONCE here so `fire`/`call`/`get` all dispatch off the exact same tuple of
+   * literal name types, rather than each re-deriving (and potentially mis-filtering) its own.
+   */
   private def buildRawRpcImpl[Raw: Type, Real: Type, Plans <: Tuple: Type](
     api: Expr[Real],
     done: Expr[Done.Of[Real]],
     ec: Expr[ExecutionContext],
   )(using Quotes,
   ): Expr[RawRpc[Raw]] =
+    type Names = Tuple.Map[Plans, [op] =>> op match
+      case ([n] =>> OpPlan { type RpcName = n })[name] => name]
     '{
       mkRawRpc[Raw](
-        (invocation: RawInvocation[Raw]) => ${ fireBody[Raw, Real, Plans](api, 'invocation, done) },
-        (invocation: RawInvocation[Raw]) => ${ callBody[Raw, Real, Plans](api, 'invocation, ec, done) },
-        (invocation: RawInvocation[Raw]) => ${ getBody[Raw, Real, Plans](api, 'invocation, done) },
+        (invocation: RawInvocation[Raw]) => ${ fireBody[Raw, Real, Plans, Names](api, 'invocation, done) },
+        (invocation: RawInvocation[Raw]) => ${ callBody[Raw, Real, Plans, Names](api, 'invocation, ec, done) },
+        (invocation: RawInvocation[Raw]) => ${ getBody[Raw, Real, Plans, Names](api, 'invocation, done) },
       )
     }
 
   // --- arity-partitioned dispatch bodies ---
 
-  private def fireBody[Raw: Type, Real: Type, Plans <: Tuple: Type](
+  /**
+   * Each body builds `values` over EVERY entry of `plans` (not just its own arity), positionally
+   * aligned with the shared `Names` by construction — an op outside this body's own arity gets a
+   * `reject` thunk in its slot instead of real dispatch logic. This is what keeps `Names`/`values`
+   * from silently drifting apart (the bug a per-body-filtered `Names` had): there is no separate
+   * filter step to fall out of sync with `values`'s own filter.
+   *
+   * Every value is a THUNK (`() => Result`), not the invocation itself: `matchFromImpl` builds
+   * `case name => args(index)` over the WHOLE `values` tuple, and constructing that tuple at all
+   * would otherwise force every op's `invokeOp` — decoding `inv`'s args against every op's own,
+   * generally mismatched, parameter types, and running every op's real implementation — on every
+   * single dispatch, not just the one op whose name matched. Thunking defers all of that to the
+   * final `()` below, which only ever runs the ONE arm `matchFromImpl` actually selected.
+   */
+  private def fireBody[Raw: Type, Real: Type, Plans <: Tuple: Type, Names <: Tuple: Type](
     api: Expr[Real],
     inv: Expr[RawInvocation[Raw]],
     done: Expr[Done.Of[Real]],
@@ -83,37 +104,31 @@ object AsRawDerivation:
   ): Expr[Unit] =
     val plans = TupleTraverse.traverseTuple[Plans, OpPlan]
 
-    val fireArms = plans.zipWithIndex.collect { case (op @ '[{ type ArityInfo = ArityTag.Fire }], index) =>
-      (op, index)
-    }
+    val fireByIndex: Map[Int, Expr[() => Unit]] =
+      plans.zipWithIndex.collect { case (op @ '[{ type ArityInfo = ArityTag.Fire }], index) =>
+        given Type[op.Underlying] = op
+        val underlying = invokeOp[Raw, Real, Any, op.Underlying](api, inv, index, done)
+        index -> '{ () => $underlying: Unit }
+      }.toMap
 
-    if fireArms.isEmpty then '{ () }
-    else
-      val names = TupleTraverse.foldTuple(fireArms.map((op, _) => op).collect {
-        case '[type n; OpPlan { type RpcName = n }] => Type.of[n]
+    val values =
+      Expr.ofRefinedTuple(plans.indices.toList.map { index =>
+        fireByIndex.getOrElse(index, '{ () => () })
       })
 
-      val values =
-        Expr.ofRefinedTuple(fireArms.map { (op, index) =>
-          given Type[op.Underlying] = op
-          val underlying = invokeOp[Raw, Real, Any, op.Underlying](api, inv, index, done)
-          '{ () => $underlying: Unit }
-        })
+    values match
+      case '{ type values <: Tuple; $values: values } =>
+        '{
+          ${
+            matchFromImpl[Names, values](
+              '{ ${ inv }.rpcName },
+              '{ NamedTuple.build[Names]()($values) },
+              '{ () => () }.asExprOf[Tuple.Union[values]],
+            ).asExprOf[() => Unit]
+          }()
+        }
 
-      (names, values) match
-        case ('[type names <: Tuple; names], '{ type values <: Tuple; $values: values }) =>
-          '{
-            ${
-              matchFromImpl[names, values](
-                '{ ${ inv }.rpcName },
-                '{ NamedTuple.build[names]()($values) },
-                '{ () => () }.asExprOf[Tuple.Union[values]],
-              ).asExprOf[() => Unit]
-            }()
-          }
-        case (_, _) => ???
-
-  private def callBody[Raw: Type, Real: Type, Plans <: Tuple: Type](
+  private def callBody[Raw: Type, Real: Type, Plans <: Tuple: Type, Names <: Tuple: Type](
     api: Expr[Real],
     inv: Expr[RawInvocation[Raw]],
     ec: Expr[ExecutionContext],
@@ -122,41 +137,34 @@ object AsRawDerivation:
   ): Expr[Future[Raw]] =
     val plans = TupleTraverse.traverseTuple[Plans, OpPlan]
 
-    val callArms = plans.zipWithIndex.collect {
-      case (op @ '[OpPlan { type ArityInfo = ArityTag.CallOf[?] }], index) => (op, index)
-    }
-
-    val names = TupleTraverse.foldTuple(callArms.map((op, _) => op).collect {
-      case '[type n; OpPlan { type RpcName = n }] => Type.of[n]
-    })
+    val callByIndex: Map[Int, Expr[() => Future[Raw]]] =
+      plans.zipWithIndex.collect { case (op @ '[OpPlan { type ArityInfo = ArityTag.CallOf[r] }], index) =>
+        given Type[op.Underlying] = op
+        val underlying = invokeOp[Raw, Real, Future[r], op.Underlying](api, inv, index, done)
+        index -> '{ () =>
+          val futureEncoder = AsRaw.forFuture[Raw, r](using scala.compiletime.summonInline[AsRaw[Raw, r]], $ec)
+          futureEncoder.asRaw($underlying)
+        }
+      }.toMap
 
     val values =
-      Expr.ofRefinedTuple(callArms.map { (op, index) =>
-        given Type[op.Underlying] = op
-        Type.of[op.Underlying] match
-          case '[OpPlan { type ArityInfo = ArityTag.CallOf[r] }] =>
-            val underlying = invokeOp[Raw, Real, Future[r], op.Underlying](api, inv, index, done)
-            '{ () =>
-              val futureEncoder = AsRaw.forFuture[Raw, r](using scala.compiletime.summonInline[AsRaw[Raw, r]], $ec)
-              futureEncoder.asRaw($underlying)
-            }
-          case _ => '{ () => ${ reject(inv) } }
+      Expr.ofRefinedTuple(plans.indices.toList.map { index =>
+        callByIndex.getOrElse(index, '{ () => ${ reject(inv) } })
       })
 
-    (names, values) match
-      case ('[type names <: Tuple; names], '{ type values <: Tuple; $values: values }) =>
+    values match
+      case '{ type values <: Tuple; $values: values } =>
         '{
           ${
-            matchFromImpl[names, values](
+            matchFromImpl[Names, values](
               '{ ${ inv }.rpcName },
-              '{ NamedTuple.build[names]()($values) },
+              '{ NamedTuple.build[Names]()($values) },
               reject(inv),
             ).asExprOf[() => Future[Raw]]
           }()
         }
-      case (_, _) => ???
 
-  private def getBody[Raw: Type, Real: Type, Plans <: Tuple: Type](
+  private def getBody[Raw: Type, Real: Type, Plans <: Tuple: Type, Names <: Tuple: Type](
     api: Expr[Real],
     inv: Expr[RawInvocation[Raw]],
     done: Expr[Done.Of[Real]],
@@ -164,35 +172,31 @@ object AsRawDerivation:
   ): Expr[RawRpc[Raw]] =
     val plans = TupleTraverse.traverseTuple[Plans, OpPlan]
 
-    val getArms = plans.zipWithIndex.collect { case (op @ '[{ type ArityInfo = ArityTag.GetOf[sub] }], index) =>
-      (op, index)
-    }
-
-    val names = TupleTraverse.foldTuple(getArms.map((op, _) => op).collect {
-      case '[type n; OpPlan { type RpcName = n }] => Type.of[n]
-    })
-
-    val values =
-      Expr.ofRefinedTuple(getArms.collect { case (op @ '[{ type ArityInfo = ArityTag.GetOf[sub] }], index) =>
+    val getByIndex: Map[Int, Expr[() => RawRpc[Raw]]] =
+      plans.zipWithIndex.collect { case (op @ '[{ type ArityInfo = ArityTag.GetOf[sub] }], index) =>
         given Type[op.Underlying] = op
         val underlying = invokeOp[Raw, Real, sub, op.Underlying](api, inv, index, done)
-        '{ () =>
+        index -> '{ () =>
           AsRaw.makeLazy[RawRpc[Raw], sub](compiletime.summonInline[AsRaw[RawRpc[Raw], sub]]).asRaw($underlying)
         }
+      }.toMap
+
+    val values =
+      Expr.ofRefinedTuple(plans.indices.toList.map { index =>
+        getByIndex.getOrElse(index, '{ () => ${ reject(inv) } })
       })
 
-    (names, values) match
-      case ('[type names <: Tuple; names], '{ type values <: Tuple; $values: values }) =>
+    values match
+      case '{ type values <: Tuple; $values: values } =>
         '{
           ${
-            matchFromImpl[names, values](
+            matchFromImpl[Names, values](
               '{ ${ inv }.rpcName },
-              '{ NamedTuple.build[names]()($values) },
+              '{ NamedTuple.build[Names]()($values) },
               reject(inv),
             ).asExprOf[() => RawRpc[Raw]]
           }()
         }
-      case (_, _) => ???
 
   // --- shared helpers ---
 
