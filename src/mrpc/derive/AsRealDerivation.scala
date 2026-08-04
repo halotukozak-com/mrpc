@@ -55,4 +55,4 @@ object AsRealDerivation:
   inline private def buildHandlers[Raw: RawRpc as raw, Real](plans: Plans[Real])(using ec: ExecutionContext): Tuple =
     @unused given RawRpc[Raw] = raw
     @unused given ExecutionContext = ec
-    compiletime.summonAll[Tuple.Map[plans.All, [O] =>> Handler[Raw, O & OpPlan]]]
+    compiletime.summonAll[Tuple.Map[plans.Underlying, [O] =>> Handler[Raw, O & OpPlan]]]

@@ -150,11 +150,10 @@ object OpPlan:
  * same convention as [[OpPlan]] itself — only its STATIC type is ever read).
  */
 sealed trait Plans[T]:
-  type All <: Tuple
-  def all: All
+  type Underlying <: Tuple
 
 object Plans:
-  transparent inline given [T: {Done.Of as done, RpcNames as names}] => Plans[T] = ${ derive[T]('done, 'names) }
+  transparent inline given [T: {Done.Of as done, RpcNames as names}] => Plans[T] = ${ derive[T, names.Names, done.Operations]('done) }
 
   /**
    * Builds `Plans[T]`'s `All` from [[OpPlan.classify]], one op at a time (in `Done.Operations` order) —
@@ -162,24 +161,14 @@ object Plans:
    * (see its doc) only exists at this macro level; folding `Type[? <: OpPlan]`s with
    * [[TupleTraverse.foldTuple]] is what actually carries it into `All`.
    */
-  private def derive[T: Type](done: Expr[Done.Of[T]], names: Expr[RpcNames[T]])(using Quotes): Expr[Plans[T]] =
-    val ops = done match
-      case '{ type operations <: Tuple; $_ : { type Operations = operations } } =>
-        TupleTraverse.traverseTuple[operations, DoneOperation]
-    val resolvedNames = RpcNames.namesOf[T](names)
+  private def derive[T: Type, Names <: Tuple: Type, Operations <: Tuple: Type](done: Expr[Done.Of[T]])(using Quotes): Expr[Plans[T]] =
+    val ops = TupleTraverse.traverseTuple[Operations, DoneOperation]
+    val resolvedNames = TupleTraverse.traverseTuple[Names, String]
     val opPlanTypes = ops.zip(resolvedNames).map((op, name) => OpPlan.classify(op, name))
     TupleTraverse.foldTuple(opPlanTypes) match
       case '[type all <: Tuple; all] =>
         '{
           (new Plans[T]:
-            type All = all
-            def all: All = null.asInstanceOf[All]
-          ): Plans[T] { type All = all }
+            type Underlying = all
+          ): Plans[T] { type Underlying = all }
         }
-
-  /** Reads [[Plans]]'s `All` back as a `List[Type[? <: OpPlan]]`, in `Done.Operations` order — the
-   * single macro-level access point [[Matcher]] reads every classified [[OpPlan]] through.
-   */
-  private[derive] def allOf[T: Type](plans: Expr[Plans[T]])(using Quotes): List[Type[? <: OpPlan]] =
-    plans.runtimeChecked match
-      case '{ type all <: Tuple; $_ : Plans[T] { type All = all } } => TupleTraverse.traverseTuple[all, OpPlan]

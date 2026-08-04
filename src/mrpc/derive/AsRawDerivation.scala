@@ -39,7 +39,7 @@ object AsRawDerivation:
    */
   inline def buildRawRpc[Raw, Real: {Done.Of as done, Plans as plans}](api: Real)(using ec: ExecutionContext)
     : RawRpc[Raw] =
-    ${ buildRawRpcImpl[Raw, Real]('api, 'done, 'plans, 'ec) }
+    ${ buildRawRpcImpl[Raw, Real, plans.Underlying]('api, 'done, 'ec) }
 
   /**
    * `mkRawRpc` is an ordinary, non-`inline` method — an anonymous class defined directly inside an
@@ -55,31 +55,29 @@ object AsRawDerivation:
       def call(invocation: RawInvocation[Raw]): Future[Raw] = callFn(invocation)
       def get(invocation: RawInvocation[Raw]): RawRpc[Raw] = getFn(invocation)
 
-  private def buildRawRpcImpl[Raw: Type, Real: Type](
+  private def buildRawRpcImpl[Raw: Type, Real: Type, Plans <: Tuple: Type](
     api: Expr[Real],
     done: Expr[Done.Of[Real]],
-    plans: Expr[Plans[Real]],
     ec: Expr[ExecutionContext],
   )(using Quotes,
   ): Expr[RawRpc[Raw]] =
-    val allPlans = Plans.allOf[Real](plans)
     '{
       mkRawRpc[Raw](
-        (invocation: RawInvocation[Raw]) => ${ fireBody[Raw, Real](api, 'invocation, allPlans, done) },
-        (invocation: RawInvocation[Raw]) => ${ callBody[Raw, Real](api, 'invocation, allPlans, ec, done) },
-        (invocation: RawInvocation[Raw]) => ${ getBody[Raw, Real](api, 'invocation, allPlans, done) },
+        (invocation: RawInvocation[Raw]) => ${ fireBody[Raw, Real, Plans](api, 'invocation, done) },
+        (invocation: RawInvocation[Raw]) => ${ callBody[Raw, Real, Plans](api, 'invocation, ec, done) },
+        (invocation: RawInvocation[Raw]) => ${ getBody[Raw, Real, Plans](api, 'invocation, done) },
       )
     }
 
   // --- arity-partitioned dispatch bodies ---
 
-  private def fireBody[Raw: Type, Real: Type](
+  private def fireBody[Raw: Type, Real: Type, Plans <: Tuple: Type](
     api: Expr[Real],
     inv: Expr[RawInvocation[Raw]],
-    plans: List[Type[? <: OpPlan]],
     done: Expr[Done.Of[Real]],
   )(using Quotes,
   ): Expr[Unit] =
+    val plans = TupleTraverse.traverseTuple[Plans, OpPlan]
     // `zipWithIndex` HERE (not upfront in some shared pre-computed list) is what makes `index` mean
     // "position in `Done.Operations`": the filter below drops entries, so an index taken from the
     // FILTERED list would point at the wrong operation once `invokeOp` uses it to read
@@ -93,14 +91,14 @@ object AsRawDerivation:
       '{ ${ invokeOp[Raw, Real, Any](api, inv, opType, index, done) }: Unit }
     }
 
-  private def callBody[Raw: Type, Real: Type](
+  private def callBody[Raw: Type, Real: Type, Plans <: Tuple: Type](
     api: Expr[Real],
     inv: Expr[RawInvocation[Raw]],
-    plans: List[Type[? <: OpPlan]],
     ec: Expr[ExecutionContext],
     done: Expr[Done.Of[Real]],
   )(using Quotes,
   ): Expr[Future[Raw]] =
+    val plans = TupleTraverse.traverseTuple[Plans, OpPlan]
     val arms = plans.zipWithIndex.filter((opType, _) =>
       (opType.runtimeChecked match
         case '[OpPlan { type ArityInfo = a }] => Type.of[a]
@@ -123,19 +121,19 @@ object AsRawDerivation:
         case _ => reject(inv)
     }
 
-  private def getBody[Raw: Type, Real: Type](
+  private def getBody[Raw: Type, Real: Type, Plans <: Tuple: Type](
     api: Expr[Real],
     inv: Expr[RawInvocation[Raw]],
-    plans: List[Type[? <: OpPlan]],
     done: Expr[Done.Of[Real]],
   )(using Quotes,
   ): Expr[RawRpc[Raw]] =
+    val plans = TupleTraverse.traverseTuple[Plans, OpPlan]
     val arms = plans.zipWithIndex.filter((opType, _) =>
-      (opType.runtimeChecked match
-        case '[OpPlan { type ArityInfo = a }] => Type.of[a]
-      ) match
-        case '[ArityTag.GetOf[?]] => true
-        case _ => false,
+      opType match
+        case '[OpPlan { type ArityInfo = a }] =>
+          Type.of[a] match
+            case '[ArityTag.GetOf[?]] => true
+            case _ => false,
     )
     matchOnName[Raw, RawRpc[Raw]](inv, arms, reject(inv)) { (opType, index) =>
       opType match

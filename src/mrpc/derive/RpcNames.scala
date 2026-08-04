@@ -30,18 +30,7 @@ object RpcNames:
         case ([l0 <: String] =>> DoneOperation { type Label = l0 })[l] => l,
     ], done.Operations]
   }
-
-  /**
-   * Reads the resolved names back off `RpcNames[T].Names` (the type-level singletons) as a `List`,
-   * in `Done.Operations` order. The single name-resolution authority for macro consumers (engine,
-   * metadata): the type-level names lowered to values, rather than each caller re-deriving
-   * `RpcNames[T]` itself. The mirror is summoned once at each macro entry point (via the
-   * `RpcNames as names` context bound) and threaded in here.
-   */
-  private[derive] def namesOf[T: Type](rpcNames: Expr[RpcNames[T]])(using Quotes): List[Type[? <: String]] =
-    rpcNames.runtimeChecked match
-      case '{ type ns <: Tuple; $_ : RpcNames[T] { type Names = ns } } => TupleTraverse.traverseTuple[ns, String]
-
+  
   private def deriveImpl[T: Type, Labels <: Tuple: Type, Operations <: Tuple: Type](using Quotes): Expr[RpcNames[T]] =
     val ops = TupleTraverse.traverseTuple[Operations, DoneOperation]
     val bases = ops.map: op =>

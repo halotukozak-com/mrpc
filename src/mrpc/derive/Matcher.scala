@@ -29,12 +29,11 @@ private[mrpc] object Matcher:
    * `null` dummy: nothing here is ever meant to be called/dereferenced at runtime, only its STATIC
    * type — a plain type projection — is used.
    */
-  transparent inline def planFor[T: {Plans as plans}, L <: String]: OpPlan =
-    ${ planForImpl[T, L]('plans) }
+  transparent inline def planFor[T: {Plans as plans}, L <: String]: OpPlan = ${ planForImpl[T, L, plans.Underlying] }
 
-  private def planForImpl[T: Type, L: Type](plans: Expr[Plans[T]])(using Quotes): Expr[OpPlan] =
+  private def planForImpl[T: Type, L: Type, Plans<: Tuple: Type](using Quotes): Expr[OpPlan] =
     import quotes.reflect.*
-    val all = Plans.allOf[T](plans)
+    val all = TupleTraverse.traverseTuple[Plans, OpPlan]
     val label = Type.valueOfConstant[L].getOrElse(report.errorAndAbort("L must be a literal string")).toString
     val idx = all.indexWhere(op => labelOf(op) == label)
     if idx < 0 then report.errorAndAbort(s"no operation labeled '$label' in ${TypeRepr.of[T].show}")
@@ -49,12 +48,11 @@ private[mrpc] object Matcher:
    * plansFor[...]`) gives each bound val its OWN precise `OpPlan` type, same as [[planFor]] does for a
    * single operation.
    */
-  transparent inline def plansFor[T: {Plans as plans}, L <: String]: Tuple =
-    ${ plansForImpl[T, L]('plans) }
+  transparent inline def plansFor[T: {Plans as plans}, L <: String]: Tuple = ${ plansForImpl[T, L, plans.Underlying] }
 
-  private def plansForImpl[T: Type, L: Type](plans: Expr[Plans[T]])(using Quotes): Expr[Tuple] =
+  private def plansForImpl[T: Type, L: Type, Plans <: Tuple:Type](using Quotes): Expr[Tuple] =
     import quotes.reflect.*
-    val all = Plans.allOf[T](plans)
+    val all = TupleTraverse.traverseTuple[Plans, OpPlan]
     val label = Type.valueOfConstant[L].getOrElse(report.errorAndAbort("L must be a literal string")).toString
     val matches = all.filter(op => labelOf(op) == label)
     if matches.isEmpty then report.errorAndAbort(s"no operation labeled '$label' in ${TypeRepr.of[T].show}")
