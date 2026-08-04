@@ -7,10 +7,10 @@ import mrpc.raw.{RawInvocation, RawRpc}
 import scala.concurrent.{ExecutionContext, Future}
 import scala.quoted.*
 
-sealed trait Handler[Raw, Op <: OpPlan]
+sealed trait Handler[Raw, Plan <: OpPlan]
 
-sealed trait EmptyHandler[Raw, Op <: OpPlan] extends Handler[Raw, Op], (() => Any)
-sealed trait NonEmptyHandler[Raw, Op <: OpPlan] extends Handler[Raw, Op], ((OpPlan.ArgsOf[Op] & Tuple) => Any)
+sealed trait EmptyHandler[Raw, Plan <: OpPlan] extends Handler[Raw, Plan], (() => Any)
+sealed trait NonEmptyHandler[Raw, Plan <: OpPlan] extends Handler[Raw, Plan], ((OpPlan.ArgsOf[Plan] & Tuple) => Any)
 
 object Handler:
 

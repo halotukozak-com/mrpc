@@ -70,14 +70,14 @@ object OpPlan:
   private val reusable = new OpPlan {}
 
   /**
-   * [[OpPlan.Args]], off a still-abstract `Op <: OpPlan` — `Op#Args` (general type projection on a
+   * [[OpPlan.Args]], off a still-abstract `Plan <: OpPlan` — `Plan#Args` (general type projection on a
    * non-singleton prefix) is disallowed, and `Args` itself is a concrete alias (not a bare abstract
    * member), so a match type can't refine it directly either; this recomputes it from `Params` (which
    * IS abstract) via the same type-lambda-application idiom [[RpcNames]]/[[Matcher]] use to extract a
    * member off an abstract type parameter. Only needed in ordinary (non-macro) declarations like
-   * [[Handler]]'s trait hierarchy; macro code just quote-pattern-matches `Type[Op]` directly.
+   * [[Handler]]'s trait hierarchy; macro code just quote-pattern-matches `Type[Plan]` directly.
    */
-  type ArgsOf[Op <: OpPlan] = Op match
+  type ArgsOf[Plan <: OpPlan] = Plan match
     case ([p <: Tuple] =>> OpPlan { type Params = p })[params] =>
       Tuple.Map[
         params,

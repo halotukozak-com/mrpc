@@ -117,11 +117,11 @@ private[mrpc] object MetadataDerivation:
     val elems = fillAllParams(made.elems).asInstanceOf[p.ElemTypes] // todo: can we avoid this asIsntanceOf?
     p.fromTuple(elems)
 
-  inline private def fillAllParams(acc110: Tuple)(using Context): Tuple = inline acc110 match
+  inline private def fillAllParams(elems: Tuple)(using Context): Tuple = inline elems match
     case _: EmptyTuple => EmptyTuple
     case _: (head *: tail) =>
-      val head = acc110.head.asInstanceOf[head & MadeElem]
-      val tail = acc110.tail.asInstanceOf[tail]
+      val head = elems.head.asInstanceOf[head & MadeElem]
+      val tail = elems.tail.asInstanceOf[tail]
 
       fillParam(head) *: fillAllParams(tail)
 
@@ -273,22 +273,23 @@ private[mrpc] object MetadataDerivation:
    * Each element recurses `buildValue` in a per-op [[Context.Method]].
    */
 
-  inline private def buildAllElems[e, Names <: Tuple](acc231: Tuple)(using Names containsOnly String): Tuple =
-    inline (acc231, compiletime.erasedValue[Names]) match
+  inline private def buildAllMethodElems[e, Names <: Tuple](ops: Tuple)(using Names containsOnly String): Tuple =
+    inline (ops, compiletime.erasedValue[Names]) match
       case (_: EmptyTuple, _: EmptyTuple) => EmptyTuple
       case (_: (head *: tail), _: (name *: names)) =>
-        val head = acc231.head.asInstanceOf[head & DoneOperation]
-        val tail = acc231.tail.asInstanceOf[tail]
+        val head = ops.head.asInstanceOf[head & DoneOperation]
+        val tail = ops.tail.asInstanceOf[tail]
 
-        buildElem[e, head.Type](using Context.Method[name & String, head & DoneOperation](head)) *: buildAllElems[e, Tuple.Tail[Names]](tail)
+        buildElem[e, head.Type](using Context.Method[name & String, head & DoneOperation](head))
+          *: buildAllMethodElems[e, Tuple.Tail[Names]](tail)
 
-  inline private def buildAllElems2[e](acc238: Tuple): Tuple = inline acc238 match
+  inline private def buildAllParamElems[e](params: Tuple): Tuple = inline params match
     case _: EmptyTuple => EmptyTuple
     case _: (head *: tail) =>
-      val head = acc238.head.asInstanceOf[head & InputElem]
-      val tail = acc238.tail.asInstanceOf[tail]
+      val head = params.head.asInstanceOf[head & InputElem]
+      val tail = params.tail.asInstanceOf[tail]
 
-      buildElem[e, head.Type](using Context.Param(head)) *: buildAllElems2[e](tail)
+      buildElem[e, head.Type](using Context.Param(head)) *: buildAllParamElems[e](tail)
 
   inline private def buildElem[elem <: AnyKind, T](using ctx: Context) = ${ buildElemImpl[elem, T]('ctx) }
 
@@ -307,12 +308,12 @@ private[mrpc] object MetadataDerivation:
         inline compiletime.erasedValue[P] match
           case _: Map[String, e] =>
             NamedTuple
-              .build[ctx.Names]()(buildAllElems[e, ctx.Names](ctx.operations))
+              .build[ctx.Names]()(buildAllMethodElems[e, ctx.Names](ctx.operations))
               .toList
               .asInstanceOf[List[(String, ?)]]
               .toMap
           case _: List[e] =>
-            buildAllElems[e, ctx.Names](ctx.operations).toList
+            buildAllMethodElems[e, ctx.Names](ctx.operations).toList
       case _: SlotArity.Optional =>
         inline compiletime.erasedValue[P] match
           case _: Option[e] =>
@@ -343,13 +344,13 @@ private[mrpc] object MetadataDerivation:
         inline compiletime.erasedValue[P] match
           case _: Map[String, e] =>
             NamedTuple
-              .build[Tuple.Map[ctx.op.InputElems, InputElem.ExtractLabel]]()(buildAllElems2[e](ctx.op.inputElems))
+              .build[Tuple.Map[ctx.op.InputElems, InputElem.ExtractLabel]]()(buildAllParamElems[e](ctx.op.inputElems))
               .toList
               .asInstanceOf[List[(String, ?)]]
               .toMap
               .asInstanceOf[P]
           case _: List[e] =>
-            buildAllElems2[e](ctx.op.inputElems).toList.asInstanceOf[P]
+            buildAllParamElems[e](ctx.op.inputElems).toList.asInstanceOf[P]
       case _: SlotArity.Optional =>
         inline compiletime.erasedValue[P] match
           case _: Option[e] =>

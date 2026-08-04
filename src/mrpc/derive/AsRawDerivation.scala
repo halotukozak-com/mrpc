@@ -198,8 +198,8 @@ object AsRawDerivation:
   // --- shared helpers ---
 
   /** Each parameter's declared `ParamType`, in the op's declaration order, off `plan`'s `Params`. */
-  private def paramTypesOf[Op <: OpPlan: Type](using Quotes): List[Type[?]] =
-    Type.of[Op] match
+  private def paramTypesOf[Plan <: OpPlan: Type](using Quotes): List[Type[?]] =
+    Type.of[Plan] match
       case '[type ps <: Tuple; OpPlan { type Params = ps }] =>
         TupleTraverse.traverseTuple[ps, ParamPlan].map { case '[ParamPlan { type ParamType = t }] => Type.of[t] }
 
@@ -211,7 +211,7 @@ object AsRawDerivation:
    * `inv.args` is nested per parameter list (`List[List[Raw]]`); it is flattened in `InputElems`
    * order before decoding, matching made's flattened `Args` contract.
    */
-  private def invokeOp[Raw: Type, Real: Type, R: Type, Op <: OpPlan: Type](
+  private def invokeOp[Raw: Type, Real: Type, R: Type, Plan <: OpPlan: Type](
     api: Expr[Real],
     inv: Expr[RawInvocation[Raw]],
     index: Int,
@@ -220,15 +220,15 @@ object AsRawDerivation:
   ): Expr[R] =
     val flatArgs = '{ ${ inv }.args.flatten }
 
-    val decodedArgs: List[Expr[?]] = paramTypesOf[Op].zipWithIndex.map:
+    val decodedArgs: List[Expr[?]] = paramTypesOf[Plan].zipWithIndex.map:
       case ('[t], i) =>
         '{ scala.compiletime.summonInline[AsReal[Raw, t]].asReal($flatArgs(${ Expr(i) })) }
       case (_, _) => ???
 
-    // `opType`'s `OpType` member IS the underlying `DoneOperation` — no need to re-walk `done`'s
+    // `Plan`'s `OpType` member IS the underlying `DoneOperation` — no need to re-walk `done`'s
     // `Operations` tuple by index to recover it. The final `.asInstanceOf[R]` below makes an
     // `OutputType`/`R` correspondence unnecessary here too.
-    val operation: Expr[? <: DoneOperation { type OuterType = Real }] = Type.of[Op] match
+    val operation: Expr[? <: DoneOperation { type OuterType = Real }] = Type.of[Plan] match
       case '[type op <: DoneOperation { type OuterType = Real }; OpPlan { type OpType = op }] =>
         '{ $done.operations(${ Expr(index) }).asInstanceOf[op] }
 
