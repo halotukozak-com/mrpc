@@ -22,6 +22,3 @@ extension (companion: Expr.type)
         case '{ type t <: Tuple; $tailExpr: t } =>
           '{ ${ headExpr.asExprOf[h] } *: ${ tailExpr.asExprOf[t] } }
 
-  private[mrpc] def ofOption[T: Type](expr: Option[Expr[T]])(using Quotes): Expr[Option[T]] = expr match
-    case None => '{ None }
-    case Some(e) => '{ Some(${ e.asExprOf[T] }) }
