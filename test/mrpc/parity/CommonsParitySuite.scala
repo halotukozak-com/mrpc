@@ -3,8 +3,6 @@ package mrpc.parity
 import scala.concurrent.duration.Duration
 import scala.concurrent.{Await, ExecutionContext, Future}
 
-import scala.util.NotGiven
-
 import mrpc.conv.{AsRaw, AsReal}
 import mrpc.derive.SampleApi.*
 import mrpc.derive.SampleApi
