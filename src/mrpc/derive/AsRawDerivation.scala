@@ -4,6 +4,7 @@ package derive
 import made.{containsOnly, Done, DoneOperation}
 import mrpc.conv.{AsRaw, AsReal}
 import mrpc.raw.{RawInvocation, RawRpc}
+import mrpc.realCons
 
 import scala.concurrent.{ExecutionContext, Future}
 import scala.quoted.*
@@ -70,13 +71,16 @@ object AsRawDerivation:
     ec: Expr[ExecutionContext],
   )(using Quotes,
   ): Expr[RawRpc[Raw]] =
-    type Names = Tuple.Map[Plans, [op] =>> op match
-      case ([n] =>> OpPlan { type RpcName = n })[name] => name]
+    type Names = Tuple.Map[
+      Plans,
+      [op] =>> op match
+        case ([n] =>> OpPlan { type RpcName = n })[name] => name,
+    ]
     '{
       mkRawRpc[Raw](
         (invocation: RawInvocation[Raw]) => ${ fireBody[Raw, Real, Plans, Names](api, 'invocation, done) },
         (invocation: RawInvocation[Raw]) => ${ callBody[Raw, Real, Plans, Names](api, 'invocation, ec, done) },
-        (invocation: RawInvocation[Raw]) => ${ getBody[Raw, Real, Plans, Names](api, 'invocation, done) },
+        (invocation: RawInvocation[Raw]) => getBody[Raw, Real, Plans, Names]($api, invocation)(using $done),
       )
     }
 
@@ -85,7 +89,7 @@ object AsRawDerivation:
   /**
    * Each body builds `values` over EVERY entry of `plans` (not just its own arity), positionally
    * aligned with the shared `Names` by construction — an op outside this body's own arity gets a
-   * `reject` thunk in its slot instead of real dispatch logic. This is what keeps `Names`/`values`
+   * `rejectImpl` thunk in its slot instead of real dispatch logic. This is what keeps `Names`/`values`
    * from silently drifting apart (the bug a per-body-filtered `Names` had): there is no separate
    * filter step to fall out of sync with `values`'s own filter.
    *
@@ -111,8 +115,8 @@ object AsRawDerivation:
       case '[type h <: OpPlan; h *: t] =>
         val arm = Type.of[h] match
           case '[OpPlan { type ArityInfo = ArityTag.Fire }] =>
-            '{ () => ${ invokeOp[Raw, Real, Any, h](api, inv, index, done) }: Unit }
-          case _ => '{ () => ${ reject(inv) } }
+            '{ () => ${ invokeImpl[Raw, Real, Any, h](api, inv, Expr(index), done) }: Unit }
+          case _ => '{ () => ${ rejectImpl(inv) } }
         arm :: arms[t](index + 1)
 
     val values = Expr.ofRefinedTuple(arms[Plans](0))
@@ -121,11 +125,11 @@ object AsRawDerivation:
       case '{ type values <: Tuple; $values: values } =>
         '{
           ${
-            matchFromImpl[Names, values](
+            matchFromImpl[Names, values, () => Unit](
               '{ ${ inv }.rpcName },
               '{ NamedTuple.build[Names]()($values) },
-              reject(inv),
-            ).asExprOf[() => Unit]
+              rejectImpl(inv),
+            )
           }()
         }
 
@@ -140,12 +144,12 @@ object AsRawDerivation:
       case '[EmptyTuple] => Nil
       case '[type h <: OpPlan; h *: t] =>
         val arm = Type.of[h] match
-          case '[OpPlan { type ArityInfo = ArityTag.CallOf[r] }] =>
+          case '[OpPlan { type ArityInfo = ArityTag.Call[r] }] =>
             '{ () =>
               val futureEncoder = AsRaw.forFuture[Raw, r](using scala.compiletime.summonInline[AsRaw[Raw, r]], $ec)
-              futureEncoder.asRaw(${ invokeOp[Raw, Real, Future[r], h](api, inv, index, done) })
+              futureEncoder.asRaw(${ invokeImpl[Raw, Real, Future[r], h](api, inv, Expr(index), done) })
             }
-          case _ => '{ () => ${ reject(inv) } }
+          case _ => '{ () => ${ rejectImpl(inv) } }
         arm :: arms[t](index + 1)
 
     val values = Expr.ofRefinedTuple(arms[Plans](0))
@@ -154,46 +158,41 @@ object AsRawDerivation:
       case '{ type values <: Tuple; $values: values } =>
         '{
           ${
-            matchFromImpl[Names, values](
+            matchFromImpl[Names, values, () => Future[Raw]](
               '{ ${ inv }.rpcName },
               '{ NamedTuple.build[Names]()($values) },
-              reject(inv),
-            ).asExprOf[() => Future[Raw]]
+              rejectImpl(inv),
+            )
           }()
         }
 
-  private def getBody[Raw: Type, Real: Type, Plans <: Tuple: Type, Names <: Tuple: Type](
-    api: Expr[Real],
-    inv: Expr[RawInvocation[Raw]],
-    done: Expr[Done.Of[Real]],
-  )(using Quotes,
-  ): Expr[RawRpc[Raw]] =
-    def arms[Tup <: Tuple: Type](index: Int): List[Expr[() => RawRpc[Raw]]] = Type.of[Tup] match
-      case '[EmptyTuple] => Nil
-      case '[type h <: OpPlan; h *: t] =>
-        val arm = Type.of[h] match
-          case '[OpPlan { type ArityInfo = ArityTag.GetOf[sub] }] =>
-            '{ () =>
-              AsRaw
-                .makeLazy[RawRpc[Raw], sub](compiletime.summonInline[AsRaw[RawRpc[Raw], sub]])
-                .asRaw(${ invokeOp[Raw, Real, sub, h](api, inv, index, done) })
-            }
-          case _ => '{ () => ${ reject(inv) } }
-        arm :: arms[t](index + 1)
+  transparent inline private def bodyArms[Raw, Real: Done.Of, Acc <: Tuple](
+    index: Int,
+  )(
+    api: Real,
+    reject: RawInvocation[Raw] => Nothing,
+  ): Tuple =
+    inline compiletime.erasedValue[Acc] match
+      case _: EmptyTuple => EmptyTuple
+      case _: (h *: t) =>
+        val arm = inline compiletime.erasedValue[h] match
+          case op: OpPlan =>
+            inline compiletime.erasedValue[op.ArityInfo] match
+              case _: ArityTag.Get[sub] =>
+                (inv: RawInvocation[Raw]) =>
+                  AsRaw
+                    .makeLazy[RawRpc[Raw], sub](compiletime.summonInline[AsRaw[RawRpc[Raw], sub]])
+                    .asRaw(invoke[Raw, Real, sub, h & OpPlan](api, inv, index))
+              case _ => (inv: RawInvocation[Raw]) => reject(inv)
+        bodyArms[Raw, Real, t](index + 1)(api, reject).realCons(arm)
 
-    val values = Expr.ofRefinedTuple(arms[Plans](0))
-
-    values match
-      case '{ type values <: Tuple; $values: values } =>
-        '{
-          ${
-            matchFromImpl[Names, values](
-              '{ ${ inv }.rpcName },
-              '{ NamedTuple.build[Names]()($values) },
-              reject(inv),
-            ).asExprOf[() => RawRpc[Raw]]
-          }()
-        }
+  inline private def getBody[Raw, Real: Done.Of, Plans <: Tuple, Names <: Tuple](
+    api: Real,
+    inv: RawInvocation[Raw],
+  ): RawRpc[Raw] =
+    matchFrom(
+      NamedTuple.build[Names]()(bodyArms[Raw, Real, Plans](0)(api, reject)),
+    )[RawInvocation[Raw] => RawRpc[Raw]](inv.rpcName, reject)(inv)
 
   // --- shared helpers ---
 
@@ -203,18 +202,16 @@ object AsRawDerivation:
       case '[type ps <: Tuple; OpPlan { type Params = ps }] =>
         TupleTraverse.traverseTuple[ps, ParamPlan].map { case '[ParamPlan { type ParamType = t }] => Type.of[t] }
 
-  /**
-   * Decodes the invocation's flat arguments to the operation's exact `InputElem.Type`s, assembles
-   * `op.Args`, and emits `Done.invoke(done, op, api, args)`. The returned term is statically typed as
-   * the operation's `OutputType`; callers ascribe it for their arity.
-   *
-   * `inv.args` is nested per parameter list (`List[List[Raw]]`); it is flattened in `InputElems`
-   * order before decoding, matching made's flattened `Args` contract.
-   */
-  private def invokeOp[Raw: Type, Real: Type, R: Type, Plan <: OpPlan: Type](
+  inline private def invoke[Raw, Real: Done.Of as done, R, Plan <: OpPlan](
+    api: Real,
+    inv: RawInvocation[Raw],
+    index: Int,
+  ): R = ${ invokeImpl[Raw, Real, R, Plan]('api, 'inv, 'index, 'done) }
+
+  private def invokeImpl[Raw: Type, Real: Type, R: Type, Plan <: OpPlan: Type](
     api: Expr[Real],
     inv: Expr[RawInvocation[Raw]],
-    index: Int,
+    index: Expr[Int],
     done: Expr[Done.Of[Real]],
   )(using quotes: Quotes,
   ): Expr[R] =
@@ -230,7 +227,7 @@ object AsRawDerivation:
     // `OutputType`/`R` correspondence unnecessary here too.
     val operation: Expr[? <: DoneOperation { type OuterType = Real }] = Type.of[Plan] match
       case '[type op <: DoneOperation { type OuterType = Real }; OpPlan { type OpType = op }] =>
-        '{ $done.operations(${ Expr(index) }).asInstanceOf[op] }
+        '{ $done.operations($index).asInstanceOf[op] }
 
     val argsTuple = Expr.ofRefinedTuple(decodedArgs)
 
@@ -240,6 +237,9 @@ object AsRawDerivation:
     }
     '{ $res.asInstanceOf[R] }
 
-  private def reject(inv: Expr[RawInvocation[?]])(using Quotes) = '{
+  private def rejectImpl(inv: Expr[RawInvocation[?]])(using Quotes) = '{
     throw new IllegalArgumentException("unknown rpc name: " + $inv.rpcName)
   }
+
+  private def reject(inv: RawInvocation[?]) =
+    throw new IllegalArgumentException("unknown rpc name: " + inv.rpcName)

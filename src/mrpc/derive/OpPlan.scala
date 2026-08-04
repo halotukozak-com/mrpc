@@ -16,13 +16,8 @@ import scala.quoted.{Expr, Quotes, Type}
 private[derive] sealed class ArityTag
 private[derive] object ArityTag:
   sealed class Fire extends ArityTag
-  sealed class Call extends ArityTag:
-    type Result
-  sealed class Get extends ArityTag:
-    type Sub
-
-  type CallOf[R] = Call { type Result = R }
-  type GetOf[S] = Get { type Sub = S }
+  sealed class Call[Result] extends ArityTag
+  sealed class Get[Sub] extends ArityTag
 
 /**
  * Type-level encode-vs-verbatim tag, classified the same way as [[ArityTag]] — via quote-pattern
@@ -106,8 +101,8 @@ object OpPlan:
     import quotes.reflect.*
     val arityType = Type.of[Op] match
       case '[{ type OutputType = Unit }] => Type.of[ArityTag.Fire]
-      case '[{ type OutputType = Future[x] }] => Type.of[ArityTag.CallOf[x]]
-      case '[{ type OutputType = other }] => Type.of[ArityTag.GetOf[other]]
+      case '[{ type OutputType = Future[x] }] => Type.of[ArityTag.Call[x]]
+      case '[{ type OutputType = other }] => Type.of[ArityTag.Get[other]]
     val paramsType: Type[? <: Tuple] = TupleTraverse.foldTuple(Type.of[Op] match
       case '[type elems <: Tuple; DoneOperation { type InputElems = elems }] =>
         TupleTraverse

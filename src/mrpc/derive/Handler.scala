@@ -103,13 +103,13 @@ object Handler:
     Type.of[Plan] match
       case '[{ type ArityInfo = ArityTag.Fire }] =>
         '{ $raw.fire($invocation) }
-      case '[{ type ArityInfo = ArityTag.CallOf[r] }] =>
+      case '[{ type ArityInfo = ArityTag.Call[r] }] =>
         '{
           val futureDecoder: AsReal[Future[Raw], Future[r]] =
             AsReal.forFuture[Raw, r](using scala.compiletime.summonInline[AsReal[Raw, r]], $ec)
           futureDecoder.asReal($raw.call($invocation))
         }
-      case '[{ type ArityInfo = ArityTag.GetOf[sub] }] =>
+      case '[{ type ArityInfo = ArityTag.Get[sub] }] =>
         '{
           val subProxy = compiletime.summonInline[AsReal[RawRpc[Raw], sub]]
           AsReal.makeLazy[RawRpc[Raw], sub](subProxy).asReal($raw.get($invocation))

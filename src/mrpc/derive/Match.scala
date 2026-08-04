@@ -6,21 +6,22 @@ import scala.quoted.*
 
 //it could be done without macro, with inline if else, but @switch for performance
 inline def matchFrom[Names <: Tuple, Values <: Tuple](
-  inline scrutinee: String,
   args: NamedTuple.NamedTuple[Names, Values],
-  inline reject: Tuple.Union[Values],
-) = ${ matchFromImpl[Names, Values]('scrutinee, 'args, 'reject) }
+)[R /* <: Tuple.Union[Values] */ ](
+  inline scrutinee: String,
+  inline reject: R,
+): R = ${ matchFromImpl[Names, Values, R]('scrutinee, 'args, 'reject) }
 
-def matchFromImpl[Names <: Tuple: Type, Values <: Tuple: Type](
+def matchFromImpl[Names <: Tuple: Type, Values <: Tuple: Type, R: Type](
   scrutinee: Expr[String],
   args: Expr[NamedTuple.NamedTuple[Names, Values]],
-  reject: Expr[Tuple.Union[Values]],
+  reject: Expr[R],
 )(using Quotes,
-): Expr[Tuple.Union[Values]] =
+): Expr[R] =
   import quotes.reflect.*
 
   val caseDefs = TupleTraverse.traverseTuple[Names, String].zipWithIndex.map { (name, index) =>
-    CaseDef(Expr(Type.valueOfConstant(using name).get).asTerm, None, '{ $args(${ Expr(index) }) }.asTerm)
+    CaseDef(Expr(Type.valueOfConstant(using name).get).asTerm, None, '{ $args(${ Expr(index)}).asInstanceOf[R]  }.asTerm) //todo: .asInstanceOf[R] is not safe :/
   }
   val default = CaseDef(Wildcard(), None, reject.asTerm)
-  Match('{ $scrutinee: @switch }.asTerm, caseDefs :+ default).asExprOf[Tuple.Union[Values]]
+  Match('{ $scrutinee: @switch }.asTerm, caseDefs :+ default).asExprOf[R]

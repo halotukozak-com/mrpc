@@ -11,33 +11,32 @@ class MatchSuite extends munit.FunSuite:
 
   test("matchFrom dispatches to the value whose name matches the scrutinee"):
     val args = (foo = 1, bar = "two", baz = true)
-    assertEquals(matchFrom("foo", args, reject = -1), 1)
-    assertEquals(matchFrom("bar", args, reject = "reject"), "two")
-    assertEquals(matchFrom("baz", args, reject = false), true)
+    assertEquals(matchFrom(args)[Any]("foo", reject = -1), 1)
+    assertEquals(matchFrom(args)[Any]("bar", reject = "reject"), "two")
+    assertEquals(matchFrom(args)[Any]("baz", reject = false), true)
 
   test("matchFrom falls back to reject when the scrutinee names none of the fields"):
     val args = (foo = 1, bar = "two")
-    assertEquals(matchFrom("nope", args, reject = -1), -1)
+    assertEquals(matchFrom(args)("nope", reject = -1), -1)
 
   test("matchFrom dispatches correctly regardless of field order"):
     val args = (bar = "two", foo = 1)
-    assertEquals(matchFrom("foo", args, reject = -1), 1)
-    assertEquals(matchFrom("bar", args, reject = "reject"), "two")
+    assertEquals(matchFrom(args)("foo", reject = -1), 1)
+    assertEquals(matchFrom(args)("bar", reject = "reject"), "two")
 
   test("matchFrom works with a single-field named tuple"):
     val args = (only = 42)
-    assertEquals(matchFrom("only", args, reject = 0), 42)
-    assertEquals(matchFrom("other", args, reject = 0), 0)
+    assertEquals(matchFrom(args)("only", reject = 0), 42)
+    assertEquals(matchFrom(args)("other", reject = 0), 0)
 
   test("matchFrom re-evaluates a non-literal scrutinee at runtime, not just literals"):
     val args = (foo = 1, bar = 2)
-    def dispatch(name: String) = matchFrom(name, args, reject = -1)
+    def dispatch(name: String) = matchFrom(args)(name, reject = -1)
     assertEquals(dispatch("foo"), 1)
     assertEquals(dispatch("bar"), 2)
     assertEquals(dispatch("baz"), -1)
 
   test("matchFrom's result type is the union of the named tuple's value types"):
     val args = (foo = 1, bar = "two")
-    val result: Int | String = matchFrom("foo", args, reject = "fallback")
+    val result: Int | String = matchFrom(args)[Int | String]("foo", reject = "fallback")
     assertEquals(result, 1)
-
