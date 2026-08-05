@@ -4,17 +4,7 @@ import scala.quoted.*
 import scala.util.Try
 
 // $COVERAGE-OFF$
-/**
- * Generates a detailed string representation of a symbol during macro expansion.
- *
- * This function produces comprehensive information about a symbol including
- * its owner, flags, names, position, documentation, and structure. It is
- * useful for debugging macro code.
- *
- * @param quotes the Quotes instance
- * @param symbol the symbol to inspect
- * @return a multi-line string with detailed symbol information
- */
+/** Dumps a `Symbol`'s owner, flags, names, position, and structure — for macro debugging. */
 private[mrpc] def symbolInfo(
   using quotes: Quotes,
 )(
@@ -74,17 +64,7 @@ private[mrpc] def symbolInfo(
      |termRef: ${Try(symbol.termRef.show).getOrElse("no termRef")}
      |""".stripMargin
 
-/**
- * Generates a detailed string representation of a type during macro expansion.
- *
- * This function produces comprehensive information about a type including
- * its widened forms, symbols, base classes, and structural properties.
- * It is useful for debugging macro code.
- *
- * @param quotes the Quotes instance
- * @param tpe the type to inspect
- * @return a multi-line string with detailed type information
- */
+/** Dumps a `TypeRepr`'s widened forms, symbols, base classes, and structural properties — for macro debugging. */
 private[mrpc] def typeReprInfo(
   using quotes: Quotes,
 )(
@@ -131,16 +111,7 @@ private[mrpc] def compareTypes[T <: AnyKind: Type, U <: AnyKind: Type](using Quo
      |${typeReprInfo(TypeRepr.of[U])}
      |""".stripMargin.dbg
 
-/**
- * Generates a string representation of a tree during macro expansion.
- *
- * This function shows both the structural representation and the short code
- * representation of a tree. It is useful for debugging macro code.
- *
- * @param quotes the Quotes instance
- * @param tree the tree to inspect
- * @return a multi-line string with tree structure and code
- */
+/** Dumps a `Tree`'s structural representation and short-code rendering — for macro debugging. */
 private[mrpc] def treeInfo(using quotes: Quotes)(tree: quotes.reflect.Tree): String =
   import quotes.reflect.*
   s"""

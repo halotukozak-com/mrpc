@@ -12,23 +12,16 @@ import scala.concurrent.ExecutionContext
  *
  * The trait synthesis is delegated to made's `Done.materialize` (the tuple-of-handlers `.to[Real]`):
  * one [[Handler]] per operation — each an `op.Args => op.OutputType` function that packages a
- * `RawInvocation` (the resolved `rpcName` + per-param-list encoded arguments) and forwards to the
- * underlying `RawRpc[Raw]`'s `fire`/`call`/`get` by arity, decoding the result back to the method's
- * exact declared type via a summoned `AsReal`. made wires method i to handler i (declaration order =
- * `Done.Operations` order = `Plans[Real].All` order), so mrpc no longer carries its own
- * `Symbol.newClass` proxy macro.
+ * `RawInvocation` and forwards to the underlying `RawRpc[Raw]`'s `fire`/`call`/`get` by arity,
+ * decoding the result back via a summoned `AsReal`. made wires method i to handler i (declaration
+ * order = `Done.Operations` order = `Plans[Real].Underlying` order), so mrpc carries no proxy macro
+ * of its own.
  *
  * Arity routing and per-handler body live in [[Handler]]; this object's only job is to read every
  * classified [[OpPlan]] off [[Plans]] and assemble the handler tuple `made.Done.materialize` expects.
  */
 object AsRealDerivation:
 
-  /**
-   * The client-proxy conversion as a plain value: `asReal` turns a `RawRpc[Raw]` into a `Real` proxy
-   * via the [[materializeProxy]] macro. The `AsReal` wrapper itself is ordinary Scala; only the
-   * per-`raw` proxy body is generated. `ExecutionContext` is in scope so the `call` arity can compose
-   * `AsReal[Future[Raw], Future[r]]` via `forFuture`.
-   */
   inline def impl[Raw, Real: {Done.Of as done}](plans: Plans[Real])(using ExecutionContext): AsReal[RawRpc[Raw], Real] =
     implicit raw => buildAllHandlers[Raw, plans.Underlying].to[Real](using done)(using ValidHandlers.refl)
 
