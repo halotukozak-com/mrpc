@@ -1,7 +1,6 @@
 package mrpc.meta
 
 import made.*
-
 import mrpc.annotation.{multi, rpcName}
 import mrpc.derive.SampleApi.SampleApi
 
@@ -38,11 +37,10 @@ class MadeAnnotationSmokeSuite extends munit.FunSuite:
   test("method-level annotation read via getAnnotations is a tuple of Option[rpcName]"):
     // The per-element delegation surface Plan 02 relies on. `getAnnotations` reads each op's
     // refined Metadata WITHOUT widening to a List first; we materialize to a List only afterwards.
-    val annots: List[Option[rpcName]] =
-      done.operations.getAnnotations[rpcName].toList.map(_.asInstanceOf[Option[rpcName]])
+    val annots = done.operations.getAnnotations[rpcName].toList.map(_.asInstanceOf[rpcName | Null])
     assertEquals(annots.size, done.operations.toList.size)
     // findRenamed carries @rpcName("findOne") — the resolved instance is readable.
-    assert(annots.exists(_.exists(_.name == "findOne")), s"expected Some(findOne) among $annots")
+    assert(annots.exists( x=> x != null && x.name == "findOne"), s"expected findOne among $annots")
 
   test("param-level annotation read: increment's `n` carries @multi (research Pitfall 2)"):
     // SampleApi declares ops in source order: ping, increment, find, users, lookup, lookup,
@@ -55,7 +53,7 @@ class MadeAnnotationSmokeSuite extends munit.FunSuite:
     val (nParam *: _) = incrementOp.inputElems: @unchecked
     assertEquals(incrementOp.label, "increment")
 
-    if nParam.getAnnotation[multi] != null then failParamCapture()
+    if nParam.getAnnotation[multi] == null then failParamCapture()
     assert(nParam.hasAnnotation[multi], "param-level @multi capture proven")
 
   test("label read: ping op's label equals its source name"):

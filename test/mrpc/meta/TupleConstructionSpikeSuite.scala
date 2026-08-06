@@ -1,7 +1,6 @@
 package mrpc.meta
 
 import made.*
-
 import mrpc.derive.SampleApi.SampleApi
 
 /**
@@ -47,7 +46,7 @@ class TupleConstructionSpikeSuite extends munit.FunSuite:
       done.operations
         .getAnnotations[mrpc.annotation.rpcName]
         .toList
-        .map(_.asInstanceOf[Option[mrpc.annotation.rpcName]].map(_.name))
+        .map(x => Option(x.asInstanceOf[mrpc.annotation.rpcName | Null]).map(_.name))
     assertEquals(names.size, opCount)
     assert(names.exists(_.contains("findOne")))
 
