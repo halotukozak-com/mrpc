@@ -20,7 +20,7 @@ import scala.concurrent.{ExecutionContext, Future}
  */
 object AsRawDerivation:
 
-  inline def impl[Raw, Real: Done.Of](plans: Plans[Real])(using ExecutionContext): AsRaw[RawRpc[Raw], Real] =
+  inline def impl[Raw, Real: Done.Of](plans: Plans.Proxy[Real])(using ExecutionContext): AsRaw[RawRpc[Raw], Real] =
     (api: Real) => buildRawRpc[Raw, Real, plans.Underlying](api)
 
   /** Assembles the dispatching `RawRpc[Raw]`; `Done.Of[Real]` is summoned once and shared across `fire`/`call`/`get`. */

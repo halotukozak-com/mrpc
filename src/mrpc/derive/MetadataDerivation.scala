@@ -94,7 +94,7 @@ private[mrpc] object MetadataDerivation:
 
   inline def impl[M[_], Real, Ops <: Tuple](
     operations: Ops,
-    names: RpcNames[Real],
+    names: RpcNames.Proxy[Real],
   )(using Ops containsOnly DoneOperation,
   )(using made: Made.Of[M[Real]],
   ): M[Real] =

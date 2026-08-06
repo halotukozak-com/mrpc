@@ -11,7 +11,7 @@ import mrpc.derive.SampleApi.*
 class RpcNamesSuite extends munit.FunSuite:
 
   test("RpcNames.Names resolves all rpcNames over an annotated trait"):
-    val rn = summon[RpcNames[SampleApi]]
+    val rn = RpcNames.materialize[SampleApi]
     val resolved: List[String] = compiletime.constValueTuple[rn.Underlying].toList.map(_.toString)
     assertEquals(resolved.size, 9)
     // every op except the overloaded `lookup` pair resolves to its plain (unsuffixed) name

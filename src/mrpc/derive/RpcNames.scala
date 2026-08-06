@@ -4,32 +4,22 @@ import made.*
 
 import scala.quoted.*
 
-/**
- * Whole-trait resolved RPC names lifted to the type level: `RpcNames[T].Underlying` is a tuple of
- * singleton string types, one per operation, in `Done.Operations` order.
- *
- * Deliberately NOT a per-op typeclass folded via `compiletime.summonAll[Tuple.Map[Done.Operations,
- * RpcName]]`: `Tuple.Map`'s per-element type-variable inference drops any `MetaAnnotation` the op
- * carries (e.g. `@multi`) before a per-op derivation could read it. Instead `deriveImpl` walks
- * `Done.Operations` reflectively in one pass — annotations stay intact in `TypeRepr` — resolves
- * `@rpcName`/`@rpcNamePrefix` and overload suffixes value-side, then emits the resolved names as types.
- */
-sealed trait RpcNames[T]:
-  type Underlying <: Tuple
-  given Underlying containsOnly String = containsOnly.refl
-
 object RpcNames:
-
-  transparent inline def materialize[T: Done.Of as done]: RpcNames[T] = ${
-    materializeImpl[T, Tuple.Map[
-      done.Operations,
-      [Op] =>> Op match
-        case ([l0 <: String] =>> DoneOperation { type Label = l0 })[l] => l,
-    ], done.Operations]
+  private type Proxy0 = TypeProxy {
+    type Underlying <: Tuple; type Ev[X >: Underlying <: Underlying] = X containsOnly String
   }
+  opaque type Proxy[T] <: Proxy0 = Proxy0
 
-  private def materializeImpl[T: Type, Labels <: Tuple: Type, Operations <: Tuple: Type](using Quotes)
-    : Expr[RpcNames[T]] =
+  transparent inline def materialize[T: Done.Of as done]: Proxy[T] =
+    ${
+      materializeImpl[T, Tuple.Map[
+        done.Operations,
+        [Op] =>> Op match
+          case ([l0 <: String] =>> DoneOperation { type Label = l0 })[l] => l,
+      ], done.Operations]
+    }
+
+  private def materializeImpl[T: Type, Labels <: Tuple: Type, Operations <: Tuple: Type](using Quotes): Expr[Proxy[T]] =
     val ops = TupleTraverse.traverseTuple[Operations, DoneOperation]
     val bases = ops.map:
       case '[type l <: String; type meta <: Tuple; { type Label = l; type Metadata = meta }] =>
@@ -58,11 +48,7 @@ object RpcNames:
 
     Expr.ofRefinedTuple(resolved.map(Expr(_))) match
       case '{ type ns <: Tuple; $_ : ns } =>
-        '{
-          (new RpcNames[T]:
-            type Underlying = ns
-          ): RpcNames[T] { type Underlying = ns }
-        }
+        '{ TypeProxy[ns, [X >: ns <: ns] =>> X containsOnly String](using containsOnly.refl) }
 
   /** Applies `@rpcNamePrefix` per its `overloadedOnly` flag. */
   private def applyPrefix[Metadata <: Tuple: Type](base: String, overloaded: Boolean)(using Quotes): String =

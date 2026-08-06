@@ -135,26 +135,14 @@ object OpPlan:
         }
       case _ => report.errorAndAbort(s"could not build OpPlan for operation ${Type.show[Op]}")
 
-/**
- * Every operation of `T`, classified once — the single authority [[AsRawDerivation]] and
- * [[AsRealDerivation]] both read from, instead of each re-deriving [[OpPlan]]s of their own.
- * `Underlying` is a tuple of fully refined [[OpPlan]] types, one per `Done.Operations` entry, in
- * order — never dereferenced as a value, same convention as [[OpPlan]] itself.
- */
-sealed trait Plans[T]:
-  type Underlying <: Tuple
-  given Underlying containsOnly OpPlan = containsOnly.refl
-
 object Plans:
-  private val reusable = new Plans[Any] {}
+  private type Proxy0 =TypeProxy { type Underlying <: Tuple; type Ev[X >: Underlying <: Underlying] = X containsOnly OpPlan }
+  opaque type Proxy[T] <: Proxy0 = Proxy0
 
-  private def apply[T](plans: Tuple): Plans[T] { type Underlying = plans.type } = reusable.asInstanceOf[
-    Plans[T] {
-      type Underlying = plans.type
-    },
-  ]
+  private def apply[T](plans: Tuple): Proxy[T] { type Underlying = plans.type } =
+    TypeProxy.apply[plans.type, [X >: plans.type <: plans.type] =>> X containsOnly OpPlan](using containsOnly.refl)
 
-  transparent inline def materialize[T: {Done.Of as done, RpcNames as names}]: Plans[T] =
+  transparent inline def materialize[T: {Done.Of as done}](names: RpcNames.Proxy[T]): Proxy[T] =
     Plans(buildAll[Tuple.Zip[names.Underlying, done.Operations]])
 
   transparent inline private def buildAll[Acc <: Tuple](
