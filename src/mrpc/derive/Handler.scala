@@ -28,18 +28,12 @@ object Handler:
       case plan =>
         inline compiletime.erasedValue[plan.OpType] match
           case op =>
-            // `op.Args` (made's own `Tuple.Map[InputElems, InputElem.ExtractOf]`) is used here, not
-            // `plan.Args` (OpPlan's own `Tuple.Map[Params, ...]`) — the latter fails to reduce once
-            // `Plan` crosses into this method as an explicit type argument from a different object
-            // (AsRealDerivation.buildAllHandlers), even though it reduces fine within AsRawDerivation's
-            // own object. Both compute the same tuple of declared param types; made's is the more
-            // directly-available, robust path.
-            inline compiletime.erasedValue[op.Args] match
+            inline compiletime.erasedValue[plan.Args] match
               case _: EmptyTuple =>
-                () => handlerBody[Raw, Plan, op.Args, plan.RpcName, op.ParamLists](EmptyTuple.asInstanceOf[op.Args])
+                () => handlerBody[Raw, Plan, plan.Args, plan.RpcName, op.ParamLists](EmptyTuple.asInstanceOf[plan.Args])
               case _ =>
                 (args: OpPlan.ArgsOf[Plan]) =>
-                  handlerBody[Raw, Plan, op.Args, plan.RpcName, op.ParamLists](args.asInstanceOf[op.Args])
+                  handlerBody[Raw, Plan, plan.Args, plan.RpcName, op.ParamLists](args.asInstanceOf[plan.Args])
 
   inline private def handlerBody[Raw: RawRpc as raw, Plan <: OpPlan, Args <: Tuple, Name <: String, Lists <: Tuple](
     tup: Args,
