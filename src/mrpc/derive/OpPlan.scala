@@ -136,11 +136,14 @@ object OpPlan:
       case _ => report.errorAndAbort(s"could not build OpPlan for operation ${Type.show[Op]}")
 
 object Plans:
-  private type Proxy0 =TypeProxy { type Underlying <: Tuple; type Ev[X >: Underlying <: Underlying] = X containsOnly OpPlan }
+  private type Proxy0 = TypeProxy { type Underlying <: Tuple }
   opaque type Proxy[T] <: Proxy0 = Proxy0
 
+  given [T, Under <: Tuple, P <: Proxy[T] {type Underlying = Under}] => (Under containsOnly OpPlan) =
+    containsOnly.refl
+
   private def apply[T](plans: Tuple): Proxy[T] { type Underlying = plans.type } =
-    TypeProxy.apply[plans.type, [X >: plans.type <: plans.type] =>> X containsOnly OpPlan](using containsOnly.refl)
+    TypeProxy.apply[plans.type]
 
   transparent inline def materialize[T: {Done.Of as done}](names: RpcNames.Proxy[T]): Proxy[T] =
     Plans(buildAll[Tuple.Zip[names.Underlying, done.Operations]])

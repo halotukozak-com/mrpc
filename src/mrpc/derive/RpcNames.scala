@@ -5,10 +5,11 @@ import made.*
 import scala.quoted.*
 
 object RpcNames:
-  private type Proxy0 = TypeProxy {
-    type Underlying <: Tuple; type Ev[X >: Underlying <: Underlying] = X containsOnly String
-  }
+  private type Proxy0 = TypeProxy { type Underlying <: Tuple }
   opaque type Proxy[T] <: Proxy0 = Proxy0
+
+  given [T, Under <: Tuple, P <: Proxy[T] { type Underlying = Under }] => (Under containsOnly String) =
+    containsOnly.refl
 
   transparent inline def materialize[T: Done.Of as done]: Proxy[T] =
     ${
@@ -48,7 +49,7 @@ object RpcNames:
 
     Expr.ofRefinedTuple(resolved.map(Expr(_))) match
       case '{ type ns <: Tuple; $_ : ns } =>
-        '{ TypeProxy[ns, [X >: ns <: ns] =>> X containsOnly String](using containsOnly.refl) }
+        '{ TypeProxy[ns] }
 
   /** Applies `@rpcNamePrefix` per its `overloadedOnly` flag. */
   private def applyPrefix[Metadata <: Tuple: Type](base: String, overloaded: Boolean)(using Quotes): String =
