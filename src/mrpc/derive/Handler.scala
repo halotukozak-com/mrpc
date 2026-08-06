@@ -4,6 +4,7 @@ package derive
 import mrpc.conv.{AsRaw, AsReal}
 import mrpc.raw.{RawInvocation, RawRpc}
 
+import scala.annotation.tailrec
 import scala.concurrent.ExecutionContext
 
 opaque type Handler[Raw, Plan <: OpPlan] = EmptyHandler[Raw, Plan] | NonEmptyHandler[Raw, Plan]
@@ -37,7 +38,7 @@ object Handler:
                 (args: ArgsOf[Plan]) =>
                   handlerBody[Raw, Plan, plan.Args, plan.RpcName, op.ParamLists](args.asInstanceOf[plan.Args])
 
-  inline def handlerBody[Raw: RawRpc as raw, Plan <: OpPlan, Args <: Tuple, Name <: String, Lists <: Tuple](
+  inline private def handlerBody[Raw: RawRpc as raw, Plan <: OpPlan, Args <: Tuple, Name <: String, Lists <: Tuple](
     tup: Args,
   )(using ec: ExecutionContext,
   ): Any =
@@ -50,26 +51,27 @@ object Handler:
         inline compiletime.erasedValue[plan.ArityInfo] match
           case _: ArityTag.Fire => raw.fire(invocation)
           case _: ArityTag.Call[r] =>
-            AsReal.forFuture[Raw, r](using scala.compiletime.summonInline[AsReal[Raw, r]], ec).asReal(raw.call(invocation))
+            AsReal
+              .forFuture[Raw, r](using scala.compiletime.summonInline[AsReal[Raw, r]], ec)
+              .asReal(raw.call(invocation))
           case _: ArityTag.Get[sub] =>
             AsReal
               .makeLazy[RawRpc[Raw], sub](scala.compiletime.summonInline[AsReal[RawRpc[Raw], sub]])
               .asReal(raw.get(invocation))
 
   /** Encodes each element of a plain (non-`NamedTuple`) args tuple to `Raw` via its own summoned `AsRaw[Raw, h]`. */
-  private inline def encodeArgs[Raw](tup: Tuple): List[Raw] = inline tup match
+  inline private def encodeArgs[Raw](tup: Tuple): List[Raw] = inline tup match
     case _: EmptyTuple => Nil
     case _: (h *: t) =>
       val head = tup.head.asInstanceOf[h]
       val tail = tup.tail.asInstanceOf[t]
       scala.compiletime.summonInline[AsRaw[Raw, h]].asRaw(head) :: encodeArgs[Raw](tail)
 
-  /** Splits `items` into consecutive groups of the given `sizes` — the inverse of `flatten`. */
   private def splitBySizes[A](items: List[A], sizes: List[Int]): List[List[A]] =
-    sizes
-      .foldLeft((remaining = items, acc = List.empty[List[A]])) { case ((remaining, acc), n) =>
+    @tailrec def loop(sizes: List[Int], remaining: List[A], acc: Vector[List[A]]): Vector[List[A]] = sizes match
+      case Nil => acc
+      case n :: next =>
         val (group, rest) = remaining.splitAt(n)
-        (rest, group :: acc)
-      }
-      .acc
-      .reverse
+        loop(next, rest, acc :+ group)
+
+    loop(sizes, items, Vector.empty).toList
