@@ -25,5 +25,5 @@ import mrpc.derive.RpcNames
  * names so metadata names cannot drift from the engine's.
  */
 trait RpcMetadataCompanion[M[_]]:
-  inline def materialize[Real: {Done.Of as done, RpcNames as names}](using made: Made.Of[M[Real]]): M[Real] =
-    mrpc.derive.MetadataDerivation.impl[M, Real, names.Underlying, done.Operations](done.operations)
+  inline def materialize[Real: {Done.Of as done}](using made: Made.Of[M[Real]]): M[Real] =
+    mrpc.derive.MetadataDerivation.impl[M, Real, done.Operations](done.operations, RpcNames.materialize[Real])

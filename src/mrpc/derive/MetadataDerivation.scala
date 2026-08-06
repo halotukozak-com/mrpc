@@ -92,15 +92,13 @@ private[mrpc] object MetadataDerivation:
         override type P = pT
         override val underlying: pT = p
 
-  inline def impl[M[_], Real, Names <: Tuple, Ops <: Tuple](
+  inline def impl[M[_], Real, Ops <: Tuple](
     operations: Ops,
-  )(using
-    Ops containsOnly DoneOperation,
-    Names containsOnly String,
-  )(using
-    made: Made.Of[M[Real]],
+    names: RpcNames[Real],
+  )(using Ops containsOnly DoneOperation,
+  )(using made: Made.Of[M[Real]],
   ): M[Real] =
-    val ctx = Context.Trait[Ops, Names](operations)
+    val ctx = Context.Trait[Ops, names.Underlying](operations)
     buildValue[M[Real]](using made, ctx)
 
   inline private def buildValue[M: Made.Of as made](using Context): M =
@@ -228,8 +226,8 @@ private[mrpc] object MetadataDerivation:
         val head = ops.head.asInstanceOf[head & DoneOperation]
         val tail = ops.tail.asInstanceOf[tail]
 
-        buildElem[e, head.Type](using Context.Method[name & String, head & DoneOperation](head))
-          *: buildAllMethodElems[e, Tuple.Tail[Names]](tail)
+        buildElem[e, head.Type](using Context.Method[name & String, head & DoneOperation](head)) *:
+          buildAllMethodElems[e, Tuple.Tail[Names]](tail)
 
   inline private def buildAllParamElems[e](params: Tuple): Tuple = inline params match
     case _: EmptyTuple => EmptyTuple

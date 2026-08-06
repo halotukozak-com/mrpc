@@ -20,15 +20,16 @@ sealed trait RpcNames[T]:
 
 object RpcNames:
 
-  transparent inline given derived[T: Done.Of as done]: RpcNames[T] = ${
-    deriveImpl[T, Tuple.Map[
+  transparent inline def materialize[T: Done.Of as done]: RpcNames[T] = ${
+    materializeImpl[T, Tuple.Map[
       done.Operations,
       [Op] =>> Op match
         case ([l0 <: String] =>> DoneOperation { type Label = l0 })[l] => l,
     ], done.Operations]
   }
 
-  private def deriveImpl[T: Type, Labels <: Tuple: Type, Operations <: Tuple: Type](using Quotes): Expr[RpcNames[T]] =
+  private def materializeImpl[T: Type, Labels <: Tuple: Type, Operations <: Tuple: Type](using Quotes)
+    : Expr[RpcNames[T]] =
     val ops = TupleTraverse.traverseTuple[Operations, DoneOperation]
     val bases = ops.map:
       case '[type l <: String; type meta <: Tuple; { type Label = l; type Metadata = meta }] =>
