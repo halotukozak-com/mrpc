@@ -16,4 +16,3 @@ extension (companion: Expr.type)
       Expr.ofRefinedTuple(tail) match
         case '{ type t <: Tuple; $tailExpr: t } =>
           '{ ${ headExpr.asExprOf[h] } *: ${ tailExpr.asExprOf[t] } }
-

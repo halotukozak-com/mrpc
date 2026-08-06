@@ -32,6 +32,6 @@ class CompileErrorSuite extends munit.FunSuite:
 //    )
 //    assert(errors.contains("first") && errors.contains("second"), s"error should name both methods; got: $errors")
 
-  // "An unsupported result type is classified as `get` and carries the result type, never silently
-  // mis-classified as a call" is asserted at the type level in MatchingSuite against this SAME `users`
-  // op (`summon[users.ArityInfo =:= ArityTag.GetOf[UsersRpc]]`) — no separate runtime check here.
+// "An unsupported result type is classified as `get` and carries the result type, never silently
+// mis-classified as a call" is asserted at the type level in MatchingSuite against this SAME `users`
+// op (`summon[users.ArityInfo =:= ArityTag.GetOf[UsersRpc]]`) — no separate runtime check here.

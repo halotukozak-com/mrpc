@@ -33,6 +33,33 @@ private[derive] sealed trait ParamPlan:
   type ParamType
   type Encoding <: EncodingTag
 
+object ParamPlan:
+  private val reusable = new ParamPlan {}
+
+  inline private def isRawCarrier[T]: Boolean = ${ isRawCarrierImpl[T] }
+
+  private def isRawCarrierImpl[T: Type](using quotes: Quotes): Expr[Boolean] =
+    import quotes.reflect.*
+    // An abstract type member / type parameter (no concrete dealias) is the only thing that could be
+    // the engine's `Raw`. Concrete leaf types (Int, String, User, ...) are always encoded. Whether a
+    // type is abstract vs. concrete isn't a named member to pattern-match on, so this stays reflect-API.
+    Expr(TypeRepr.of[T].typeSymbol.isAbstractType)
+
+  transparent inline def materialize[Elem <: InputElem]: ParamPlan = inline compiletime.erasedValue[Elem] match
+    case ie =>
+      val encodingType =
+        inline if ie.hasAnnotation[mrpc.annotation.verbatim] && isRawCarrier[ie.Type]
+        then TypeProxy[EncodingTag.Verbatim]
+        else TypeProxy[EncodingTag.Encoded]
+
+      reusable.asInstanceOf[
+        ParamPlan {
+          type Label = ie.Label;
+          type ParamType = ie.Type;
+          type Encoding = encodingType.Underlying
+        },
+      ]
+
 /**
  * One operation's classification, at the type level: arity, resolved rpcName, per-parameter encode
  * plan, and the underlying `DoneOperation` this plan describes. [[Plans]] collects a `Tuple` of these,
@@ -73,73 +100,40 @@ object OpPlan:
           case ([p0] =>> ParamPlan { type ParamType = p0 })[p] => p,
       ]
 
-  transparent inline def materialize[Op <: DoneOperation, Name <: String]: OpPlan = ${ materializeImpl[Op, Name] }
+  transparent inline private def arityOf[Output]: TypeProxy = inline compiletime.erasedValue[Output] match
+    case _: Unit => TypeProxy[ArityTag.Fire]
+    case _: Future[x] => TypeProxy[ArityTag.Call[x]]
+    case _ => TypeProxy[ArityTag.Get[Output]]
 
-  /**
-   * Classifies a single operation (its resolved rpcName + its `DoneOperation` type) into a fully
-   * refined [[OpPlan]] type: arity (from `OutputType`), a per-parameter encode-vs-verbatim plan, and
-   * the underlying `OpType`/`RpcName`. The ONLY place classification happens — [[Plans]] (which collects
-   * one per `T`, once) is its only caller; every other consumer reads already-classified [[OpPlan]]s
-   * back off [[Plans]] instead of re-deriving them.
-   *
-   * MUST be a macro, not a `transparent inline given` summoned per position via `Tuple.Map`: the
-   * richer type returned here (`ArityInfo`/`Params`/... set, not just `OpType`/`RpcName`) does not
-   * propagate through `compiletime.summonAll` — the tuple's static element type there is fixed to
-   * whatever alias the `Tuple.Map` lambda names, regardless of what the `given` actually infers.
-   */
-  private[derive] def materializeImpl[Op <: DoneOperation: Type, Name <: String: Type](using quotes: Quotes)
-    : Expr[OpPlan] =
-    import quotes.reflect.*
-    val arityType = Type.of[Op] match
-      case '[{ type OutputType = Unit }] => Type.of[ArityTag.Fire]
-      case '[{ type OutputType = Future[x] }] => Type.of[ArityTag.Call[x]]
-      case '[{ type OutputType = other }] => Type.of[ArityTag.Get[other]]
-    val paramsType: Type[? <: Tuple] = TupleTraverse.foldTuple(Type.of[Op] match
-      case '[type elems <: Tuple; DoneOperation { type InputElems = elems }] =>
-        TupleTraverse
-          .traverseTuple[elems, InputElem]
-          .map { case '[type m <: Tuple; InputElem { type Label = l; type Type = t; type Metadata = m }] =>
-            def isVerbatim[T: Type] = TypeRepr.of[T] match
-              case AnnotatedType(_, annot) => annot.tpe <:< TypeRepr.of[mrpc.annotation.verbatim]
-              case _ => false
+  transparent inline def materialize[Op <: DoneOperation, Name <: String]: OpPlan =
+    inline compiletime.erasedValue[Op] match
+      case op =>
+        build[Op, Name, op.Label](arityOf[op.OutputType], buildParams[op.InputElems])
+  transparent inline def build[Op <: DoneOperation, Name <: String, label <: String](
+    arity: TypeProxy,
+    params: Tuple,
+  ): OpPlan = reusable.asInstanceOf[
+    OpPlan {
+      type Label = label
+      type RpcName = Name
+      type ArityInfo = arity.Underlying
+      type Params = params.type
+      type ResultEncoding = EncodingTag.Encoded
+      type OpType = Op
+    },
+  ]
 
-            val encodingType =
-              if TupleTraverse.traverseTuple[m, Meta].exists(isVerbatim(using _)) && OpReflect.isRawCarrier[t]
-              then Type.of[EncodingTag.Verbatim]
-              else Type.of[EncodingTag.Encoded]
-            encodingType match
-              case '[type e <: EncodingTag; e] =>
-                Type.of[ParamPlan { type Label = l; type ParamType = t; type Encoding = e }]
-          })
-
-    // Under the fixed-RawRpc model the result is always encoded via the summoned leaf bridge unless
-    // it is itself Raw; @verbatim on a non-Raw result has no identity to land on. Result-verbatim is
-    // therefore only reachable through the same Raw-type check params use; v1 fixtures encode results.
-    (Type.of[Op], arityType, paramsType) match
-      case (
-            '[type l <: String; { type Label = l }],
-            '[type a <: ArityTag; a],
-            '[type ps <: Tuple; ps],
-          ) =>
-        '{
-          reusable.asInstanceOf[
-            OpPlan {
-              type Label = l
-              type RpcName = Name
-              type ArityInfo = a
-              type Params = ps
-              type ResultEncoding = EncodingTag.Encoded
-              type OpType = Op
-            },
-          ]
-        }
-      case _ => report.errorAndAbort(s"could not build OpPlan for operation ${Type.show[Op]}")
+  transparent inline private def buildParams[Acc <: Tuple](using Acc containsOnly InputElem): Tuple =
+    inline compiletime.erasedValue[Acc] match
+      case _: EmptyTuple => EmptyTuple
+      case _: (h *: tail) =>
+        buildParams[tail & Tuple.Tail[Acc]].realCons(ParamPlan.materialize[h & InputElem])
 
 object Plans:
   private type Proxy0 = TypeProxy { type Underlying <: Tuple }
   opaque type Proxy[T] <: Proxy0 = Proxy0
 
-  given [T, Under <: Tuple, P <: Proxy[T] {type Underlying = Under}] => (Under containsOnly OpPlan) =
+  given [T, Under <: Tuple, P <: Proxy[T] { type Underlying = Under }] => (Under containsOnly OpPlan) =
     containsOnly.refl
 
   private def apply[T](plans: Tuple): Proxy[T] { type Underlying = plans.type } =

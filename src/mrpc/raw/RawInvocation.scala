@@ -10,6 +10,6 @@ package mrpc.raw
  */
 final case class RawInvocation[Raw](
   rpcName: String,
-  args: List[List[Raw]], //todo: may it be flatenned? or at least Seq?
+  args: List[List[Raw]], // todo: may it be flatenned? or at least Seq?
   metadata: Map[String, String] = Map.empty,
 )

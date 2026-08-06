@@ -3,6 +3,7 @@ package mrpc.derive
 import made.*
 import mrpc.conv.AsReal
 import mrpc.raw.RawRpc
+import mrpc.realCons
 
 import scala.concurrent.ExecutionContext
 
@@ -22,11 +23,14 @@ import scala.concurrent.ExecutionContext
  */
 object AsRealDerivation:
 
-  inline def impl[Raw, Real: {Done.Of as done}](plans: Plans.Proxy[Real])(using ExecutionContext): AsReal[RawRpc[Raw], Real] =
+  inline def impl[Raw, Real: {Done.Of as done}](plans: Plans.Proxy[Real])(using ExecutionContext)
+    : AsReal[RawRpc[Raw], Real] =
     implicit raw => buildAllHandlers[Raw, plans.Underlying].to[Real](using done)(using ValidHandlers.refl)
 
-  transparent inline private def buildAllHandlers[Raw: RawRpc, Plans <: Tuple](using Plans containsOnly OpPlan, ExecutionContext)
-    : Tuple = inline compiletime.erasedValue[Plans] match
+  transparent inline private def buildAllHandlers[Raw: RawRpc, Plans <: Tuple](
+    using Plans containsOnly OpPlan,
+    ExecutionContext,
+  ): Tuple = inline compiletime.erasedValue[Plans] match
     case _: EmptyTuple => EmptyTuple
     case _: (head *: tail) =>
-      Handler.materialize[Raw, head & OpPlan] *: buildAllHandlers[Raw, tail & Tuple.Tail[Plans]]
+      buildAllHandlers[Raw, tail & Tuple.Tail[Plans]].realCons(Handler.materialize[Raw, head & OpPlan])

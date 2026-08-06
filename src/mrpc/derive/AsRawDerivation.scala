@@ -161,7 +161,7 @@ object AsRawDerivation:
     val argsTuple = decodedArgs[Raw, Args](inv.args.flatten)(0)
     done.invoke(operation, api, argsTuple.asInstanceOf[operation.Args]).asInstanceOf[R]
 
-  private transparent inline def decodedArgs[Raw, Acc <: Tuple](flatArgs: List[Raw])(i: Int): Tuple =
+  transparent inline private def decodedArgs[Raw, Acc <: Tuple](flatArgs: List[Raw])(i: Int): Tuple =
     inline compiletime.erasedValue[Acc] match
       case _: EmptyTuple => EmptyTuple
       case _: (h *: tail) =>

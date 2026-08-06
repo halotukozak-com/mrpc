@@ -50,7 +50,7 @@ class RoundTripLawProps extends munit.ScalaCheckSuite:
   private given AsReal[RawRpc[String], UsersRpc] = SampleApiCodec.materializeAsReal[UsersRpc]
 
   // real -> raw -> real: the full materialized stack the law runs every generated input through.
-  private val rawRpc: RawRpc[String] = {SampleApiCodec.materializeAsRaw[SampleApi]}.asRaw(impl)
+  private val rawRpc: RawRpc[String] = { SampleApiCodec.materializeAsRaw[SampleApi] }.asRaw(impl)
   private val proxy: SampleApi = SampleApiCodec.materializeAsReal[SampleApi].asReal(rawRpc)
 
   private def await[A](f: Future[A]): A = Await.result(f, Duration.Inf)

@@ -10,10 +10,7 @@ import scala.concurrent.ExecutionContext
 opaque type Handler[Raw, Plan <: OpPlan] = EmptyHandler[Raw, Plan] | NonEmptyHandler[Raw, Plan]
 
 opaque type EmptyHandler[Raw, Plan <: OpPlan] = () => Any
-opaque type NonEmptyHandler[Raw, Plan <: OpPlan] = ArgsOf[Plan] => Any
-
-type ArgsOf[Plan <: OpPlan] = Plan match
-  case ([args0] =>> OpPlan { type Args = args0 })[args] => args
+opaque type NonEmptyHandler[Raw, Plan <: OpPlan] = OpPlan.ArgsOf[Plan] => Any
 
 object Handler:
 
@@ -31,12 +28,18 @@ object Handler:
       case plan =>
         inline compiletime.erasedValue[plan.OpType] match
           case op =>
-            inline compiletime.erasedValue[plan.Args] match
+            // `op.Args` (made's own `Tuple.Map[InputElems, InputElem.ExtractOf]`) is used here, not
+            // `plan.Args` (OpPlan's own `Tuple.Map[Params, ...]`) — the latter fails to reduce once
+            // `Plan` crosses into this method as an explicit type argument from a different object
+            // (AsRealDerivation.buildAllHandlers), even though it reduces fine within AsRawDerivation's
+            // own object. Both compute the same tuple of declared param types; made's is the more
+            // directly-available, robust path.
+            inline compiletime.erasedValue[op.Args] match
               case _: EmptyTuple =>
-                () => handlerBody[Raw, Plan, plan.Args, plan.RpcName, op.ParamLists](EmptyTuple.asInstanceOf[plan.Args])
+                () => handlerBody[Raw, Plan, op.Args, plan.RpcName, op.ParamLists](EmptyTuple.asInstanceOf[op.Args])
               case _ =>
-                (args: ArgsOf[Plan]) =>
-                  handlerBody[Raw, Plan, plan.Args, plan.RpcName, op.ParamLists](args.asInstanceOf[plan.Args])
+                (args: OpPlan.ArgsOf[Plan]) =>
+                  handlerBody[Raw, Plan, op.Args, plan.RpcName, op.ParamLists](args.asInstanceOf[op.Args])
 
   inline private def handlerBody[Raw: RawRpc as raw, Plan <: OpPlan, Args <: Tuple, Name <: String, Lists <: Tuple](
     tup: Args,

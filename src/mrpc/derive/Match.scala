@@ -21,7 +21,7 @@ def matchFromImpl[Names <: Tuple: Type, Values <: Tuple: Type, R: Type](
   import quotes.reflect.*
 
   val caseDefs = TupleTraverse.traverseTuple[Names, String].zipWithIndex.map { (name, index) =>
-    CaseDef(Expr(Type.valueOfConstant(using name).get).asTerm, None, '{ $args(${ Expr(index)}).asInstanceOf[R]  }.asTerm) //todo: .asInstanceOf[R] is not safe :/
+    CaseDef(Expr(Type.valueOfConstant(using name).get).asTerm, None, '{ $args(${ Expr(index) }).asInstanceOf[R] }.asTerm)
   }
   val default = CaseDef(Wildcard(), None, reject.asTerm)
   Match('{ $scrutinee: @switch }.asTerm, caseDefs :+ default).asExprOf[R]

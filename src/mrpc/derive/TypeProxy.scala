@@ -1,7 +1,7 @@
 package mrpc
 package derive
 
-sealed trait TypeProxy: // todo: erased
+sealed trait TypeProxy:
   type Underlying
 
 object TypeProxy:

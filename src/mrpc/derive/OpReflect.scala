@@ -16,18 +16,6 @@ private[mrpc] object OpReflect:
   def hasAnnotation[A: {Type, FromExpr}, Metadata <: Tuple: Type](using Quotes): Boolean =
     findAnnotation[A, Metadata].isDefined
 
-  /**
-   * Whether a parameter type is the abstract `Raw` carrier. In this standalone matcher `Raw` is not a
-   * concrete in-scope type, so no fixture param matches; the check exists so the `@verbatim` branch is
-   * faithful (verbatim only when the param IS `Raw`) without ever firing on encoded leaf types.
-   */
-  def isRawCarrier[T: Type](using Quotes): Boolean =
-    import quotes.reflect.*
-    // An abstract type member / type parameter (no concrete dealias) is the only thing that could be
-    // the engine's `Raw`. Concrete leaf types (Int, String, User, ...) are always encoded. Whether a
-    // type is abstract vs. concrete isn't a named member to pattern-match on, so this stays reflect-API.
-    TypeRepr.of[T].typeSymbol.isAbstractType
-
   // --- internals ---
 
   /** Locates an annotation term of type `A` in the op's `Metadata`, like made's `getAnnotationImpl`. */

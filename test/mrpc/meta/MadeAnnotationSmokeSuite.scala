@@ -55,7 +55,7 @@ class MadeAnnotationSmokeSuite extends munit.FunSuite:
     val (nParam *: _) = incrementOp.inputElems: @unchecked
     assertEquals(incrementOp.label, "increment")
 
-    if !nParam.getAnnotation[multi].isDefined then failParamCapture()
+    if nParam.getAnnotation[multi] != null then failParamCapture()
     assert(nParam.hasAnnotation[multi], "param-level @multi capture proven")
 
   test("label read: ping op's label equals its source name"):
