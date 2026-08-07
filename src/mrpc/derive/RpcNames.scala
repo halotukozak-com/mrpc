@@ -2,8 +2,10 @@ package mrpc
 package derive
 
 import made.*
+import made.annotation.MetaAnnotation
+import mrpc.derive.RpcNames.loop
 
-import scala.compiletime.ops.int.+
+import scala.compiletime.ops.int.{+, >}
 import scala.quoted.*
 import scala.Tuple.Tail
 import scala.annotation.tailrec
@@ -50,51 +52,37 @@ object RpcNames:
     transparent inline private def getOverloadedOnly: Boolean | Null = ${ getOverloadedOnlyImpl[op.Metadata] }
     transparent inline private def getPrefix: String | Null = ${ getPrefixImpl[op.Metadata] }
 
+  given [T: ToExpr] => ToExpr[T | Null]:
+    override def apply(x: T | Null)(using Quotes): Expr[T | Null] =
+      x match
+        case null => '{ null }
+        case x: T @unchecked => Expr(x)
+
+  @tailrec
+  private def loop[Tup <: Tuple: Type, Annot <: MetaAnnotation: {Type, FromExpr}](using quotes: Quotes): Option[Annot] =
+    import quotes.reflect.*
+    Type.of[Tup] match
+      case '[EmptyTuple] =>
+        None
+      case '[t *: ts] =>
+        TypeRepr.of[t] match
+          case AnnotatedType(_, annot) if annot.tpe <:< TypeRepr.of[Annot] =>
+            annot.asExprOf[Annot] match
+              case Expr(x) => Some(x)
+          case _ => loop[ts, Annot]
+
   private def getRpcNameImpl[M <: Tuple: Type](using quotes: Quotes): Expr[String | Null] =
     import quotes.reflect.*
+    Expr(loop[M, mrpc.annotation.rpcName].map(_.name).orNull)
 
-    @tailrec
-    def loop[Tup <: Tuple: Type](using Quotes): Expr[String | Null] = Type.of[Tup] match
-      case '[EmptyTuple] =>
-        '{ null }
-      case '[t *: ts] =>
-        TypeRepr.of[t] match
-          case AnnotatedType(_, annot) if annot.tpe <:< TypeRepr.of[mrpc.annotation.rpcName] =>
-            annot.asExprOf[mrpc.annotation.rpcName] match
-              case Expr(x) => Expr(x.name)
-          case _ => loop[ts]
-
-    loop[M]
   private def getOverloadedOnlyImpl[M <: Tuple: Type](using quotes: Quotes): Expr[Boolean | Null] =
     import quotes.reflect.*
+    Expr(loop[M, mrpc.annotation.rpcNamePrefix].map(_.overloadedOnly).orNull)
 
-    @tailrec
-    def loop[Tup <: Tuple: Type](using Quotes): Expr[Boolean | Null] = Type.of[Tup] match
-      case '[EmptyTuple] =>
-        '{ null }
-      case '[t *: ts] =>
-        TypeRepr.of[t] match
-          case AnnotatedType(_, annot) if annot.tpe <:< TypeRepr.of[mrpc.annotation.rpcNamePrefix] =>
-            annot.asExprOf[mrpc.annotation.rpcNamePrefix] match
-              case Expr(x) => Expr(x.overloadedOnly)
-          case _ => loop[ts]
-
-    loop[M]
   private def getPrefixImpl[M <: Tuple: Type](using quotes: Quotes): Expr[String | Null] =
     import quotes.reflect.*
 
-    @tailrec
-    def loop[Tup <: Tuple: Type](using Quotes): Expr[String | Null] = Type.of[Tup] match
-      case '[EmptyTuple] =>
-        '{ null }
-      case '[t *: ts] =>
-        TypeRepr.of[t] match
-          case AnnotatedType(_, annot) if annot.tpe <:< TypeRepr.of[mrpc.annotation.rpcNamePrefix] =>
-            annot.asExprOf[mrpc.annotation.rpcNamePrefix] match
-              case Expr(x) => Expr(x.prefix)
-          case _ => loop[ts]
-
-    loop[M]
+    Expr(loop[M, mrpc.annotation.rpcNamePrefix].map(_.prefix).orNull)
 
   /**
    */
@@ -134,7 +122,7 @@ object RpcNames:
     compiletime.requireConst(res)
     widen(res)
 
-  private type FirstIndexOfAcc[Tup <: Tuple, T, N <: Int] = Tup match
+  private type FirstIndexOfAcc[Tup <: Tuple, T, N <: Int] <: Int = Tup match
     case T *: tail => N
     case _ *: tail => FirstIndexOfAcc[tail, T, N + 1]
     case EmptyTuple => Nothing
@@ -143,7 +131,7 @@ object RpcNames:
 
   private type Overloaded[Names <: Tuple, Values <: Tuple, Name <: String] <: Boolean = FirstIndexOf[Names, Name] match
     case Nothing => false
-    case _ => true
+    case ([n] =>> n)[n] => (Tuple.Elem[Values, n] & Int) > 1
 
   transparent inline private def applyPrefix2[Base <: String](op: DoneOperation, overloaded: Boolean): String =
     inline val base = compiletime.constValue[Base]
@@ -168,11 +156,10 @@ object RpcNames:
         case ie => nameOf[ie.Type] *: buildTypeNames(elems.tail.asInstanceOf[tail & Tuple.Tail[elems.type]])
   transparent inline private def buildRpcNames[T: Done.Of as done](
     bases: Tuple,
-  ): Tuple =
-    // todo: add duplicates
+  ): Tuple = checkDuplicates(
     buildResolveds[
       NoDuplicates[bases.type],
-      Tuple.Map[NoDuplicates[bases.type], Occurrences0[bases.type]], // n * n time
+      Tuple.Map[NoDuplicates[bases.type], Occurrences[bases.type]], // n * n time
     ](
       bases,
       done.operations,
@@ -181,7 +168,13 @@ object RpcNames:
       containsOnly.refl,
       containsOnly.refl,
       containsOnly.refl,
-    )
+    ),
+  )
+
+  inline private def checkDuplicates(result: Tuple): result.type =
+    inline if result.hasDuplicates then
+      compiletime.error("Duplicate RPC names found. Consider using @rpcName to disambiguate.")
+    result
 
   transparent inline def materialize[T: Done.Of as done]: Tuple =
     buildRpcNames(buildBases(done.operations))
@@ -195,18 +188,16 @@ object RpcNames:
     val hash = sig.hashCode & 0x7fffffff
     Expr(s"_${hash.toHexString}")
 
-  private type Occurrences0[Tup <: Tuple] = [T] =>> Tuple.Size[Tuple.Filter[
-    Tup,
-    [X] =>> X match
-      case T => true
-      case _ => false,
-  ]]
+  private type Occurrences0[Acc <: Tuple, T, N <: Int] = Acc match
+    case EmptyTuple => N
+    case T *: tail => Occurrences0[tail, T, N + 1]
+    case _ *: tail => Occurrences0[tail, T, N]
 
-  private type NoDuplicatesAcc[Tup <: Tuple, Acc <: Tuple] <: Tuple = Tup match
-    case EmptyTuple => Acc
+  private type Occurrences[Tup <: Tuple] = [T] =>> Occurrences0[Tup, T, 0]
+
+  private type NoDuplicates[Tup <: Tuple] <: Tuple = Tup match
+    case EmptyTuple => EmptyTuple
     case h *: t =>
-      Tuple.Contains[Acc, h] match
-        case true => NoDuplicatesAcc[t, Acc]
-        case false => NoDuplicatesAcc[t, Tuple.Concat[Acc, h *: EmptyTuple]]
-
-  private type NoDuplicates[Tup <: Tuple] = NoDuplicatesAcc[Tup, EmptyTuple]
+      Tuple.Contains[t, h] match
+        case true => NoDuplicates[t]
+        case false => h *: NoDuplicates[t]
