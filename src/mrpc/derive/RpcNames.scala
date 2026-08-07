@@ -67,10 +67,10 @@ object RpcNames:
     bases: Tuple,
     operations: Tuple,
   )(using
-    inline ev1: bases.type containsOnly String,
-    inline ev2: operations.type containsOnly DoneOperation,
-    inline ev3: Names containsOnly String,
-    inline ev4: Values containsOnly Int,
+     bases.type containsOnly String,
+     operations.type containsOnly DoneOperation,
+     Names containsOnly String,
+     Values containsOnly Int,
   ): Tuple =
     inline operations match // for some reason it cannot match on (operations, bases)
       case _: EmptyTuple =>
@@ -125,7 +125,7 @@ object RpcNames:
 
   transparent inline private def buildTypeNames(
     elems: Tuple,
-  )(using inline ev: elems.type containsOnly InputElem,
+  )(using elems.type containsOnly InputElem,
   ): Tuple = inline elems match
     case _: EmptyTuple => EmptyTuple
     case _: (head *: tail) =>

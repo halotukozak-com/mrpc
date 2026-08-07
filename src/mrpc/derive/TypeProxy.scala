@@ -1,14 +1,16 @@
 package mrpc
 
+import scala.annotation.nowarn
+import scala.compiletime.Erased
 import scala.quoted.{Expr, Quotes, Type}
 
-sealed trait TypeProxy:
+sealed class TypeProxy extends Erased:
   type Underlying
 
 object TypeProxy:
 
-  private val reusable = new TypeProxy {}
-  def apply[T]: TypeProxy { type Underlying = T } = reusable.asInstanceOf[TypeProxy { type Underlying = T }]
+  @nowarn("msg=duplicated at each inline site")
+  inline def apply[T]: TypeProxy { type Underlying = T } = new TypeProxy { type Underlying = T }
 
   transparent inline def apply[T](inline t: T): TypeProxy { type Underlying <: T } =
     ${ applyImpl('t) }
