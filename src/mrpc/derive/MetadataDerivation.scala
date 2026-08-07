@@ -108,11 +108,11 @@ private[mrpc] object MetadataDerivation:
 
   inline private def fillAllParams(elems: Tuple)(using Context): Tuple = inline elems match
     case _: EmptyTuple => EmptyTuple
-    case _: (head *: tail) =>
+    case _: (head *: tail2) =>
       val head = elems.head.asInstanceOf[head & MadeElem]
-      val tail = elems.tail.asInstanceOf[tail]
+      val tail = elems.tail.asInstanceOf[tail2]
 
-      fillParam(head) *: fillAllParams(tail)
+      realCons(fillParam(head), fillAllParams(tail))
 
   extension (e: MadeElem) transparent inline private def getUserRawName: Boolean = ${ getUserRawNameImpl[e.Metadata] }
 
@@ -222,12 +222,13 @@ private[mrpc] object MetadataDerivation:
   inline private def buildAllMethodElems[e, Names <: Tuple](ops: Tuple)(using Names containsOnly String): Tuple =
     inline (ops, compiletime.erasedValue[Names]) match
       case (_: EmptyTuple, _: EmptyTuple) => EmptyTuple
-      case (_: (head *: tail), _: (name *: names)) =>
-        val head = ops.head.asInstanceOf[head & DoneOperation]
-        val tail = ops.tail.asInstanceOf[tail]
-
-        buildElem[e, head.Type](using Context.Method[name & String, head & DoneOperation](head)) *:
-          buildAllMethodElems[e, Tuple.Tail[Names]](tail)
+      case (_: (opHead *: opTail), _: (nameHead *: nameTail)) =>
+        val opHead = ops.head.asInstanceOf[opHead & DoneOperation]
+        val opTail = ops.tail.asInstanceOf[opTail]
+        realCons(
+          buildElem[e, opHead.Type](using Context.Method[nameHead & String, opHead & DoneOperation](opHead)),
+          buildAllMethodElems[e, Tuple.Tail[Names]](opTail),
+        )
 
   inline private def buildAllParamElems[e](params: Tuple): Tuple = inline params match
     case _: EmptyTuple => EmptyTuple
@@ -235,7 +236,7 @@ private[mrpc] object MetadataDerivation:
       val head = params.head.asInstanceOf[head & InputElem]
       val tail = params.tail.asInstanceOf[tail]
 
-      buildElem[e, head.Type](using Context.Param(head)) *: buildAllParamElems[e](tail)
+      realCons(buildElem[e, head.Type](using Context.Param(head)), buildAllParamElems[e](tail))
 
   inline private def buildElem[elem <: AnyKind, T](using ctx: Context) = ${ buildElemImpl[elem, T]('ctx) }
 

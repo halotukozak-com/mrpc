@@ -40,7 +40,7 @@ class MadeAnnotationSmokeSuite extends munit.FunSuite:
     val annots = done.operations.getAnnotations[rpcName].toList.map(_.asInstanceOf[rpcName | Null])
     assertEquals(annots.size, done.operations.toList.size)
     // findRenamed carries @rpcName("findOne") — the resolved instance is readable.
-    assert(annots.exists( x=> x != null && x.name == "findOne"), s"expected findOne among $annots")
+    assert(annots.exists(x => x != null && x.name == "findOne"), s"expected findOne among $annots")
 
   test("param-level annotation read: increment's `n` carries @multi (research Pitfall 2)"):
     // SampleApi declares ops in source order: ping, increment, find, users, lookup, lookup,

@@ -64,6 +64,10 @@ private[mrpc] def symbolInfo(
      |termRef: ${Try(symbol.termRef.show).getOrElse("no termRef")}
      |""".stripMargin
 
+private[mrpc] def typeInfo[T: Type](
+  using quotes: Quotes,
+): String = typeReprInfo(quotes.reflect.TypeRepr.of[T])
+
 /** Dumps a `TypeRepr`'s widened forms, symbols, base classes, and structural properties — for macro debugging. */
 private[mrpc] def typeReprInfo(
   using quotes: Quotes,

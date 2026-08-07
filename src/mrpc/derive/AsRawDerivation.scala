@@ -4,7 +4,6 @@ package derive
 import made.{containsOnly, Done, DoneOperation}
 import mrpc.conv.{AsRaw, AsReal}
 import mrpc.raw.{RawInvocation, RawRpc}
-import mrpc.realCons
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -21,10 +20,10 @@ import scala.concurrent.{ExecutionContext, Future}
 object AsRawDerivation:
 
   inline def impl[Raw, Real: Done.Of](plans: Plans.Proxy[Real])(using ExecutionContext): AsRaw[RawRpc[Raw], Real] =
-    (api: Real) => buildRawRpc[Raw, Real, plans.Underlying](api)
+    (api: Real) => buildRawRpc[Raw, Real, plans.Underlying](api)(using containsOnly.refl)
 
   /** Assembles the dispatching `RawRpc[Raw]`; `Done.Of[Real]` is summoned once and shared across `fire`/`call`/`get`. */
-  inline private def buildRawRpc[Raw, Real: {Done.Of as done}, Plans <: Tuple](
+  inline def buildRawRpc[Raw, Real: {Done.Of as done}, Plans <: Tuple](
     api: Real,
   )(using Plans containsOnly OpPlan,
   )(using ec: ExecutionContext,
@@ -76,14 +75,14 @@ object AsRawDerivation:
   ): Tuple =
     inline compiletime.erasedValue[Acc] match
       case _: EmptyTuple => EmptyTuple
-      case _: (h *: t) =>
-        val arm = inline compiletime.erasedValue[h & OpPlan] match
+      case _: (head *: tail) =>
+        val arm = inline compiletime.erasedValue[head & OpPlan] match
           case op =>
             inline compiletime.erasedValue[op.ArityInfo] match
               case _: ArityTag.Fire =>
                 (inv: RawInvocation[Raw]) => invoke[Raw, Real, Any, op.type, op.Args](api, inv, index): Unit
               case _ => (inv: RawInvocation[Raw]) => reject(inv)
-        fireArms[Raw, Real, t](api)(index + 1).realCons(arm)
+        realCons(arm, fireArms[Raw, Real, tail](api)(index + 1))
 
   inline private def fireBody[Raw, Real, Plans <: Tuple, Names <: Tuple](
     api: Real,
@@ -102,8 +101,8 @@ object AsRawDerivation:
   ): Tuple =
     inline compiletime.erasedValue[Acc] match
       case _: EmptyTuple => EmptyTuple
-      case _: (h *: t) =>
-        val arm = inline compiletime.erasedValue[h & OpPlan] match
+      case _: (head *: tail) =>
+        val arm = inline compiletime.erasedValue[head & OpPlan] match
           case op =>
             inline compiletime.erasedValue[op.ArityInfo] match
               case _: ArityTag.Call[r] =>
@@ -111,7 +110,7 @@ object AsRawDerivation:
                   val futureEncoder = AsRaw.forFuture[Raw, r](using scala.compiletime.summonInline[AsRaw[Raw, r]], ec)
                   futureEncoder.asRaw(invoke[Raw, Real, Future[r], op.type, op.Args](api, inv, index))
               case _ => (inv: RawInvocation[Raw]) => reject(inv)
-        callArms[Raw, Real, t](api)(index + 1).realCons(arm)
+        realCons(arm, callArms[Raw, Real, tail](api)(index + 1))
 
   inline private def callBody[Raw, Real, Plans <: Tuple, Names <: Tuple](
     api: Real,
@@ -129,8 +128,8 @@ object AsRawDerivation:
   ): Tuple =
     inline compiletime.erasedValue[Acc] match
       case _: EmptyTuple => EmptyTuple
-      case _: (h *: t) =>
-        val arm = inline compiletime.erasedValue[h & OpPlan] match
+      case _: (head *: tail) =>
+        val arm = inline compiletime.erasedValue[head & OpPlan] match
           case op =>
             inline compiletime.erasedValue[op.ArityInfo] match
               case _: ArityTag.Get[sub] =>
@@ -139,7 +138,7 @@ object AsRawDerivation:
                     .makeLazy[RawRpc[Raw], sub](compiletime.summonInline[AsRaw[RawRpc[Raw], sub]])
                     .asRaw(invoke[Raw, Real, sub, op.type, op.Args](api, inv, index))
               case _ => (inv: RawInvocation[Raw]) => reject(inv)
-        bodyArms[Raw, Real, t](api)(index + 1).realCons(arm)
+        realCons(arm, bodyArms[Raw, Real, tail](api)(index + 1))
 
   inline private def getBody[Raw, Real, Plans <: Tuple, Names <: Tuple](
     api: Real,
@@ -161,11 +160,14 @@ object AsRawDerivation:
     val argsTuple = decodedArgs[Raw, Args](inv.args.flatten)(0)
     done.invoke(operation, api, argsTuple.asInstanceOf[operation.Args]).asInstanceOf[R]
 
-  transparent inline private def decodedArgs[Raw, Acc <: Tuple](flatArgs: List[Raw])(i: Int): Tuple =
+  transparent inline private def decodedArgs[Raw, Acc <: Tuple](flatArgs: Seq[Raw])(i: Int): Tuple =
     inline compiletime.erasedValue[Acc] match
       case _: EmptyTuple => EmptyTuple
-      case _: (h *: tail) =>
-        scala.compiletime.summonInline[AsReal[Raw, h]].asReal(flatArgs(i)) *: decodedArgs[Raw, tail](flatArgs)(i + 1)
+      case _: (head *: tail) =>
+        realCons(
+          scala.compiletime.summonInline[AsReal[Raw, head]].asReal(flatArgs(i)),
+          decodedArgs[Raw, tail](flatArgs)(i + 1),
+        )
 
   private def reject(inv: RawInvocation[?]): Nothing =
     throw new IllegalArgumentException("unknown rpc name: " + inv.rpcName)

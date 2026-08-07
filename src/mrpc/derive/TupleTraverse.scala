@@ -1,4 +1,5 @@
-package mrpc.derive
+package mrpc
+package derive
 
 import scala.quoted.*
 
@@ -12,6 +13,7 @@ private[derive] object TupleTraverse:
   def traverseTuple[Tup <: Tuple: Type, T: Type](using Quotes): List[Type[? <: T]] = Type.of[Tup] match
     case '[EmptyTuple] => Nil
     case '[type t <: T; *:[t, ts]] => Type.of[t] :: traverseTuple[ts, T]
+    case '[other] => throw MatchError(typeInfo[other])
 
   /** Folds element types into a `*:`-cons tuple type, in order — the inverse of [[traverseTuple]]. */
   def foldTuple(elems: List[Type[?]])(using Quotes): Type[? <: Tuple] =

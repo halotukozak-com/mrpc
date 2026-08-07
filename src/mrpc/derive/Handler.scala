@@ -10,7 +10,10 @@ import scala.concurrent.ExecutionContext
 opaque type Handler[Raw, Plan <: OpPlan] = EmptyHandler[Raw, Plan] | NonEmptyHandler[Raw, Plan]
 
 opaque type EmptyHandler[Raw, Plan <: OpPlan] = () => Any
-opaque type NonEmptyHandler[Raw, Plan <: OpPlan] = OpPlan.ArgsOf[Plan] => Any
+opaque type NonEmptyHandler[Raw, Plan <: OpPlan] = ArgsOf[Plan] => Any
+
+type ArgsOf[Plan] <: Tuple = Plan match
+  case ([args0] =>> OpPlan { type Args = args0 })[args] => args & Tuple
 
 object Handler:
 
@@ -26,14 +29,11 @@ object Handler:
   inline def materialize[Raw: RawRpc, Plan <: OpPlan](using ExecutionContext): Handler[Raw, Plan] =
     inline compiletime.erasedValue[Plan] match
       case plan =>
-        inline compiletime.erasedValue[plan.OpType] match
-          case op =>
-            inline compiletime.erasedValue[plan.Args] match
-              case _: EmptyTuple =>
-                () => handlerBody[Raw, Plan, plan.Args, plan.RpcName, op.ParamLists](EmptyTuple.asInstanceOf[plan.Args])
-              case _ =>
-                (args: OpPlan.ArgsOf[Plan]) =>
-                  handlerBody[Raw, Plan, plan.Args, plan.RpcName, op.ParamLists](args.asInstanceOf[plan.Args])
+        inline compiletime.erasedValue[plan.Args] match
+          case _: EmptyTuple =>
+            () => handlerBody[Raw, Plan, plan.Args, plan.RpcName, plan.ParamLists](EmptyTuple.asInstanceOf[plan.Args])
+          case _ =>
+            (args: ArgsOf[Plan]) => handlerBody[Raw, Plan, plan.Args, plan.RpcName, plan.ParamLists](args.asInstanceOf[plan.Args])
 
   inline private def handlerBody[Raw: RawRpc as raw, Plan <: OpPlan, Args <: Tuple, Name <: String, Lists <: Tuple](
     tup: Args,
@@ -59,10 +59,10 @@ object Handler:
   /** Encodes each element of a plain (non-`NamedTuple`) args tuple to `Raw` via its own summoned `AsRaw[Raw, h]`. */
   inline private def encodeArgs[Raw](tup: Tuple): List[Raw] = inline tup match
     case _: EmptyTuple => Nil
-    case _: (h *: t) =>
-      val head = tup.head.asInstanceOf[h]
-      val tail = tup.tail.asInstanceOf[t]
-      scala.compiletime.summonInline[AsRaw[Raw, h]].asRaw(head) :: encodeArgs[Raw](tail)
+    case _: (head *: tail) =>
+      val head = tup.head.asInstanceOf[head]
+      val tail = tup.tail.asInstanceOf[tail]
+      scala.compiletime.summonInline[AsRaw[Raw, head]].asRaw(head) :: encodeArgs[Raw](tail)
 
   private def splitBySizes[A](items: List[A], sizes: List[Int]): List[List[A]] =
     @tailrec def loop(sizes: List[Int], remaining: List[A], acc: Vector[List[A]]): Vector[List[A]] = sizes match

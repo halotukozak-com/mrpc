@@ -75,6 +75,7 @@ private[derive] sealed trait OpPlan:
   type OpType <: DoneOperation
 
   type Args <: Tuple
+  type ParamLists <: Tuple
 
 object OpPlan:
 
@@ -86,9 +87,9 @@ object OpPlan:
     case _ => TypeProxy[ArityTag.Get[Output]]
 
   transparent inline def materialize[Name <: String](op: DoneOperation): OpPlan =
-    build[op.type, Name, op.Label](arityOf[op.OutputType], buildParams(op.inputElems))
+    build[op.type, Name, op.Label, op.ParamLists](arityOf[op.OutputType], buildParams(op.inputElems))
 
-  transparent inline def build[Op <: DoneOperation, Name <: String, label <: String](
+  transparent inline def build[Op <: DoneOperation, Name <: String, label <: String, Lists <: Tuple](
     arity: TypeProxy,
     params: Tuple,
   ): OpPlan = reusable.asInstanceOf[
@@ -104,10 +105,11 @@ object OpPlan:
         [X] =>> X match
           case ([p0] =>> ParamPlan { type ParamType = p0 })[p] => p,
       ]
+      type ParamLists = Lists
     },
   ]
 
-  transparent inline def buildParams(elems: Tuple)(using elems.type containsOnly InputElem): Tuple =
+  transparent inline private def buildParams(elems: Tuple)(using elems.type containsOnly InputElem): Tuple =
     inline elems match
       case _: EmptyTuple => EmptyTuple
       case _: (h *: tail4) =>
@@ -120,10 +122,10 @@ object Plans:
   private type Proxy0 = TypeProxy { type Underlying <: Tuple }
   opaque type Proxy[T] <: Proxy0 = Proxy0
 
-  transparent inline def apply[T](inline plans: Tuple): Proxy[T] =
+  transparent inline private def apply[T](inline plans: Tuple): Proxy[T] =
     ${ applyImpl[T]('plans) }
 
-  def applyImpl[T](plans: Expr[Tuple])(using quotes: Quotes): Expr[Proxy[T]] =
+  private def applyImpl[T](plans: Expr[Tuple])(using quotes: Quotes): Expr[Proxy[T]] =
     import quotes.reflect.*
     plans.asTerm.tpe.widen.asType match
       case '[type tup <: Tuple; tup] =>
@@ -131,7 +133,7 @@ object Plans:
   transparent inline def materialize[T: {Done.Of as done}](names: RpcNames.Proxy[T]): Proxy[T] =
     Plans(buildAll[names.Underlying](done.operations))
 
-  transparent inline def buildAll[Names <: Tuple](
+  transparent inline private def buildAll[Names <: Tuple](
     operations: Tuple,
   )(using
     Names containsOnly String,
