@@ -16,37 +16,14 @@ object RpcNames:
   ): Tuple = inline operations match
     case _: EmptyTuple => EmptyTuple
     case _: (head *: tail) =>
-      inline compiletime.erasedValue[head & DoneOperation] match
-        case op =>
-          realCons(
-            base[op.Metadata, op.Label],
-            buildBases(operations.tail.asInstanceOf[tail]),
-          )
-
-  // todo: i hope it can be demacronize
-  transparent inline private def base[M <: Tuple, Label <: String]: String = ${ baseImpl[M, Label] }
-
-  private def baseImpl[M <: Tuple: Type, Label <: String: Type](using quotes: Quotes): Expr[String] =
-    import quotes.reflect.*
-
-    @tailrec
-    def loop[Tup <: Tuple: Type](using Quotes): Expr[String] = Type.of[Tup] match
-      case '[EmptyTuple] =>
-        '{ compiletime.constValue[Label] }
-      case '[t *: ts] =>
-        TypeRepr.of[t] match
-          case AnnotatedType(_, annot) if annot.tpe <:< TypeRepr.of[mrpc.annotation.rpcName] =>
-            annot.asExprOf[mrpc.annotation.rpcName] match
-              case Expr(x) => Expr(x.name)
-          case _ => loop[ts]
-
-    val res = loop[M]
-
-    res.asTerm.tpe.dealias.asType match
-      case '[type base <: String; base] =>
-        Expr(Type.valueOfConstant[base].get)
+      val head = operations.head.asInstanceOf[head & DoneOperation]
+      realCons(head.base, buildBases(operations.tail.asInstanceOf[tail]))
 
   extension (op: DoneOperation)
+    transparent inline private def base: String =
+      inline op.getRpcName match
+        case null => compiletime.constValue[op.Label]
+        case rpcName => rpcName
     transparent inline private def overloadedSuffix: String = ${ overloadedSuffixImpl[op.InputElems] }
     transparent inline private def getRpcName: String | Null = ${ getRpcNameImpl[op.Metadata] }
     transparent inline private def getOverloadedOnly: Boolean | Null = ${ getOverloadedOnlyImpl[op.Metadata] }
