@@ -14,15 +14,15 @@ import scala.quoted.{Expr, Quotes, Type}
  */
 private[derive] sealed class ArityTag
 private[derive] object ArityTag:
-  sealed class Fire extends ArityTag
-  sealed class Call[Result] extends ArityTag
-  sealed class Get[Sub] extends ArityTag
+  object Fire extends ArityTag
+  class Call[Result] extends ArityTag
+  class Get[Sub] extends ArityTag
 
 /** Type-level encode-vs-verbatim tag, classified the same way as [[ArityTag]]. */
 private[derive] sealed trait EncodingTag
 private[derive] object EncodingTag:
-  sealed trait Encoded extends EncodingTag
-  sealed trait Verbatim extends EncodingTag
+  object Encoded extends EncodingTag
+  object Verbatim extends EncodingTag
 
 private[derive] sealed trait ParamPlan:
   type Label <: String
@@ -41,18 +41,18 @@ object ParamPlan:
     // type is abstract vs. concrete isn't a named member to pattern-match on, so this stays reflect-API.
     Expr(TypeRepr.of[T].typeSymbol.isAbstractType)
 
-  transparent inline private def encodingOf(ie: InputElem): TypeProxy { type Underlying <: EncodingTag } =
+  transparent inline private def encodingOf(ie: InputElem): EncodingTag =
     inline if ie.hasAnnotation[mrpc.annotation.verbatim] && isRawCarrier[ie.Type]
-    then TypeProxy[EncodingTag.Verbatim]
-    else TypeProxy[EncodingTag.Encoded]
+    then EncodingTag.Verbatim
+    else EncodingTag.Encoded
 
-  inline def apply(ie: InputElem, encodingTag: TypeProxy)
-    : ParamPlan { type Label = ie.Label; type ParamType = ie.Type; type Encoding = encodingTag.Underlying } =
+  inline def apply(ie: InputElem, encodingTag: EncodingTag)
+    : ParamPlan { type Label = ie.Label; type ParamType = ie.Type; type Encoding = encodingTag.type } =
     reusable.asInstanceOf[
       ParamPlan {
         type Label = ie.Label
         type ParamType = ie.Type
-        type Encoding = encodingTag.Underlying
+        type Encoding = encodingTag.type
       },
     ]
 
@@ -81,24 +81,24 @@ object OpPlan:
 
   private val reusable = new OpPlan {}
 
-  transparent inline private def arityOf[Output]: TypeProxy = inline compiletime.erasedValue[Output] match
-    case _: Unit => TypeProxy[ArityTag.Fire]
-    case _: Future[x] => TypeProxy[ArityTag.Call[x]]
-    case _ => TypeProxy[ArityTag.Get[Output]]
+  transparent inline private def arityOf[Output]: ArityTag = inline compiletime.erasedValue[Output] match
+    case _: Unit => ArityTag.Fire
+    case _: Future[x] => ArityTag.Call[x]
+    case _ => ArityTag.Get[Output]
 
   transparent inline def materialize[Name <: String](op: DoneOperation): OpPlan =
     build[op.type, Name, op.Label, op.ParamLists](arityOf[op.OutputType], buildParams(op.inputElems))
 
   transparent inline def build[Op <: DoneOperation, Name <: String, label <: String, Lists <: Tuple](
-    arity: TypeProxy,
+    arity: ArityTag,
     params: Tuple,
   ): OpPlan = reusable.asInstanceOf[
     OpPlan {
       type Label = label
       type RpcName = Name
-      type ArityInfo = arity.Underlying
+      type ArityInfo = arity.type
       type Params = params.type
-      type ResultEncoding = EncodingTag.Encoded
+      type ResultEncoding = EncodingTag.Encoded.type
       type OpType = Op
       type Args = Tuple.Map[
         params.type,

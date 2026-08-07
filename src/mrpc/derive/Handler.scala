@@ -47,7 +47,7 @@ object Handler:
     inline compiletime.erasedValue[Plan] match
       case plan =>
         inline compiletime.erasedValue[plan.ArityInfo] match
-          case _: ArityTag.Fire => raw.fire(invocation)
+          case ArityTag.Fire => raw.fire(invocation)
           case _: ArityTag.Call[r] =>
             AsReal
               .forFuture[Raw, r](using scala.compiletime.summonInline[AsReal[Raw, r]], ec)
