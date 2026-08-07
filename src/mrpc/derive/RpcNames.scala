@@ -3,7 +3,6 @@ package derive
 
 import made.*
 import made.annotation.MetaAnnotation
-import mrpc.derive.RpcNames.loop
 
 import scala.compiletime.ops.int.{+, >}
 import scala.quoted.*
@@ -48,17 +47,13 @@ object RpcNames:
               case Expr(x) => Some(x)
           case _ => loop[ts, Annot]
 
-  private def getRpcNameImpl[M <: Tuple: Type](using quotes: Quotes): Expr[String | Null] =
-    import quotes.reflect.*
+  private def getRpcNameImpl[M <: Tuple: Type](using Quotes): Expr[String | Null] =
     Expr(loop[M, mrpc.annotation.rpcName].map(_.name).orNull)
 
-  private def getOverloadedOnlyImpl[M <: Tuple: Type](using quotes: Quotes): Expr[Boolean | Null] =
-    import quotes.reflect.*
+  private def getOverloadedOnlyImpl[M <: Tuple: Type](using Quotes): Expr[Boolean | Null] =
     Expr(loop[M, mrpc.annotation.rpcNamePrefix].map(_.overloadedOnly).orNull)
 
-  private def getPrefixImpl[M <: Tuple: Type](using quotes: Quotes): Expr[String | Null] =
-    import quotes.reflect.*
-
+  private def getPrefixImpl[M <: Tuple: Type](using Quotes): Expr[String | Null] =
     Expr(loop[M, mrpc.annotation.rpcNamePrefix].map(_.prefix).orNull)
 
   /**
