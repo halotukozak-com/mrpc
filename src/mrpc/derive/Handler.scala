@@ -33,7 +33,8 @@ object Handler:
           case _: EmptyTuple =>
             () => handlerBody[Raw, Plan, plan.Args, plan.RpcName, plan.ParamLists](EmptyTuple.asInstanceOf[plan.Args])
           case _ =>
-            (args: ArgsOf[Plan]) => handlerBody[Raw, Plan, plan.Args, plan.RpcName, plan.ParamLists](args.asInstanceOf[plan.Args])
+            (args: ArgsOf[Plan]) =>
+              handlerBody[Raw, Plan, plan.Args, plan.RpcName, plan.ParamLists](args.asInstanceOf[plan.Args])
 
   inline private def handlerBody[Raw: RawRpc as raw, Plan <: OpPlan, Args <: Tuple, Name <: String, Lists <: Tuple](
     tup: Args,

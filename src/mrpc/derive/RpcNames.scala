@@ -1,8 +1,12 @@
-package mrpc.derive
+package mrpc
+package derive
 
 import made.*
 
+import scala.compiletime.ops.int.+
 import scala.quoted.*
+import scala.Tuple.Tail
+import scala.annotation.tailrec
 
 object RpcNames:
   private type Proxy0 = TypeProxy { type Underlying <: Tuple }
@@ -10,76 +14,208 @@ object RpcNames:
 
   given [T, Under <: Tuple, P <: Proxy[T] { type Underlying = Under }] => (Under containsOnly String) =
     containsOnly.refl
+  transparent inline private def buildBases(
+    operations: Tuple,
+  ): Tuple = inline operations match
+    case _: EmptyTuple => EmptyTuple
+    case _: (head *: tail) =>
+      inline compiletime.erasedValue[head & DoneOperation] match
+        case op =>
+          realCons(
+            base[op.Metadata, op.Label],
+            buildBases(operations.tail.asInstanceOf[tail]),
+          )
 
-  transparent inline def materialize[T: Done.Of as done]: Proxy[T] =
-    ${
-      materializeImpl[T, Tuple.Map[
-        done.Operations,
-        [Op] =>> Op match
-          case ([l0 <: String] =>> DoneOperation { type Label = l0 })[l] => l,
-      ], done.Operations]
-    }
+  // todo: i hope it can be demacronize
+  transparent inline private def base[M <: Tuple, Label <: String]: String = ${ baseImpl[M, Label] }
 
-  private def materializeImpl[T: Type, Labels <: Tuple: Type, Operations <: Tuple: Type](using Quotes): Expr[Proxy[T]] =
-    val ops = TupleTraverse.traverseTuple[Operations, DoneOperation]
-    val bases = ops.map:
-      case '[type l <: String; type meta <: Tuple; { type Label = l; type Metadata = meta }] =>
-        OpReflect
-          .findAnnotation[mrpc.annotation.rpcName, meta]
-          .map(_.name)
-          .getOrElse(Type.valueOfConstant[l].get)
+  private def baseImpl[M <: Tuple: Type, Label <: String: Type](using quotes: Quotes): Expr[String] =
+    import quotes.reflect.*
 
-    // Group by base name to detect overloads: a base shared by >1 op is an overloaded set.
-    val baseCounts: Map[String, Int] = bases.groupBy(identity).view.mapValues(_.size).toMap
+    @tailrec
+    def loop[Tup <: Tuple: Type](using Quotes): Expr[String] = Type.of[Tup] match
+      case '[EmptyTuple] =>
+        '{ compiletime.constValue[Label] }
+      case '[t *: ts] =>
+        TypeRepr.of[t] match
+          case AnnotatedType(_, annot) if annot.tpe <:< TypeRepr.of[mrpc.annotation.rpcName] =>
+            annot.asExprOf[mrpc.annotation.rpcName] match
+              case Expr(x) => Expr(x.name)
+          case _ => loop[ts]
 
-    val resolved = ops
-      .zip(bases)
-      .map:
-        case ('[type elems <: Tuple; type meta <: Tuple; { type InputElems = elems; type Metadata = meta }], base) =>
-          val overloaded = baseCounts.getOrElse(base, 0) > 1
-          val prefixed = applyPrefix[meta](base, overloaded)
-          // Only overloaded members without their own @rpcName disambiguation get the signature suffix.
-          if overloaded && !OpReflect.hasAnnotation[mrpc.annotation.rpcName, meta] then prefixed + overloadSuffix[elems]
-          else prefixed
-        case (_, _) => ???
+    val res = loop[M]
 
-    val labels = Type.valueOfTuple[Labels].get.toList.asInstanceOf[List[String]]
+    res.asTerm.tpe.dealias.asType match
+      case '[type base <: String; base] =>
+        Expr(Type.valueOfConstant[base].get)
 
-    detectDuplicates(labels, resolved)
+  extension (op: DoneOperation)
+    transparent inline private def overloadedSuffix: String = ${ overloadedSuffixImpl[op.InputElems] }
+    transparent inline private def getRpcName: String | Null = ${ getRpcNameImpl[op.Metadata] }
+    transparent inline private def getOverloadedOnly: Boolean | Null = ${ getOverloadedOnlyImpl[op.Metadata] }
+    transparent inline private def getPrefix: String | Null = ${ getPrefixImpl[op.Metadata] }
 
-    Expr.ofRefinedTuple(resolved.map(Expr(_))) match
-      case '{ type ns <: Tuple; $_ : ns } =>
-        '{ TypeProxy[ns] }
+  private def getRpcNameImpl[M <: Tuple: Type](using quotes: Quotes): Expr[String | Null] =
+    import quotes.reflect.*
 
-  /** Applies `@rpcNamePrefix` per its `overloadedOnly` flag. */
-  private def applyPrefix[Metadata <: Tuple: Type](base: String, overloaded: Boolean)(using Quotes): String =
-    OpReflect.findAnnotation[mrpc.annotation.rpcNamePrefix, Metadata] match
-      case None => base
-      case Some(annot) =>
-        if !annot.overloadedOnly || overloaded then annot.prefix + base else base
+    @tailrec
+    def loop[Tup <: Tuple: Type](using Quotes): Expr[String | Null] = Type.of[Tup] match
+      case '[EmptyTuple] =>
+        '{ null }
+      case '[t *: ts] =>
+        TypeRepr.of[t] match
+          case AnnotatedType(_, annot) if annot.tpe <:< TypeRepr.of[mrpc.annotation.rpcName] =>
+            annot.asExprOf[mrpc.annotation.rpcName] match
+              case Expr(x) => Expr(x.name)
+          case _ => loop[ts]
+
+    loop[M]
+  private def getOverloadedOnlyImpl[M <: Tuple: Type](using quotes: Quotes): Expr[Boolean | Null] =
+    import quotes.reflect.*
+
+    @tailrec
+    def loop[Tup <: Tuple: Type](using Quotes): Expr[Boolean | Null] = Type.of[Tup] match
+      case '[EmptyTuple] =>
+        '{ null }
+      case '[t *: ts] =>
+        TypeRepr.of[t] match
+          case AnnotatedType(_, annot) if annot.tpe <:< TypeRepr.of[mrpc.annotation.rpcNamePrefix] =>
+            annot.asExprOf[mrpc.annotation.rpcNamePrefix] match
+              case Expr(x) => Expr(x.overloadedOnly)
+          case _ => loop[ts]
+
+    loop[M]
+  private def getPrefixImpl[M <: Tuple: Type](using quotes: Quotes): Expr[String | Null] =
+    import quotes.reflect.*
+
+    @tailrec
+    def loop[Tup <: Tuple: Type](using Quotes): Expr[String | Null] = Type.of[Tup] match
+      case '[EmptyTuple] =>
+        '{ null }
+      case '[t *: ts] =>
+        TypeRepr.of[t] match
+          case AnnotatedType(_, annot) if annot.tpe <:< TypeRepr.of[mrpc.annotation.rpcNamePrefix] =>
+            annot.asExprOf[mrpc.annotation.rpcNamePrefix] match
+              case Expr(x) => Expr(x.prefix)
+          case _ => loop[ts]
+
+    loop[M]
 
   /**
-   * Deterministic, reorder-stable suffix for an overloaded method: `_` followed by a positive
-   * hexadecimal hash of the flattened parameter type `show` strings joined by a separator. Distinct
-   * signatures yield distinct suffixes; reordering the overloads does not change any one suffix.
    */
-  private def overloadSuffix[Elems <: Tuple: Type](using Quotes): String =
+  transparent inline private def buildResolveds[Names <: Tuple, Values <: Tuple](
+    bases: Tuple,
+    operations: Tuple,
+  )(using
+    inline ev1: bases.type containsOnly String,
+    inline ev2: operations.type containsOnly DoneOperation,
+    inline ev3: Names containsOnly String,
+    inline ev4: Values containsOnly Int,
+  ): Tuple =
+    inline operations match // for some reason it cannot match on (operations, bases)
+      case _: EmptyTuple =>
+        inline bases match
+          case _: EmptyTuple => EmptyTuple
+      case _: (op *: tailOps) =>
+        inline bases match
+          case _: (base *: tailBases) =>
+            realCons(
+              widen(buildResolved[Names, Values, base & String](operations.head.asInstanceOf[op & DoneOperation])),
+              buildResolveds[Names, Values](
+                bases.tail.asInstanceOf[tailBases & Tail[bases.type]],
+                operations.tail.asInstanceOf[tailOps & Tail[operations.type]],
+              ),
+            )
+
+  transparent inline private def buildResolved[Names <: Tuple, Values <: Tuple, Base <: String](
+    op: DoneOperation,
+  ): String =
+    inline val overloaded = compiletime.constValue[Overloaded[Names, Values, Base]]
+    inline val prefixed = applyPrefix2[Base](op, overloaded)
+    // Only overloaded members without their own @rpcName disambiguation get the signature suffix.
+    inline val res = inline if overloaded && !op.hasAnnotation[mrpc.annotation.rpcName] then
+      prefixed + op.overloadedSuffix
+    else prefixed
+    compiletime.requireConst(res)
+    widen(res)
+
+
+  private type FirstIndexOfAcc[Tup <: Tuple, T, N <: Int] = Tup match
+    case T *: tail => N
+    case _ *: tail => FirstIndexOfAcc[tail, T, N + 1]
+    case EmptyTuple => Nothing
+
+  private type FirstIndexOf[Tup <: Tuple, T] = FirstIndexOfAcc[Tup, T, 0]
+
+  private type Overloaded[Names <: Tuple, Values <: Tuple, Name <: String] <: Boolean = FirstIndexOf[Names, Name] match
+    case Nothing => false
+    case _ => true
+
+  transparent inline private def applyPrefix2[Base <: String](op: DoneOperation, overloaded: Boolean): String =
+    inline val base = compiletime.constValue[Base]
+    inline op.getOverloadedOnly match
+      case _: Null => base
+      case overloadedOnly: Boolean =>
+        inline if !overloadedOnly || overloaded then
+          inline op.getPrefix match
+            case prefix: String => prefix + base
+        else base
+
+  transparent inline private def nameOf[T]: String = ${ nameOfImpl[T] }
+  private def nameOfImpl[T: Type](using Quotes) = Expr(Type.show[T])
+
+  transparent inline private def buildTypeNames(
+    elems: Tuple,
+  )(using inline ev: elems.type containsOnly InputElem,
+  ): Tuple = inline elems match
+    case _: EmptyTuple => EmptyTuple
+    case _: (head *: tail) =>
+      inline compiletime.erasedValue[head & InputElem] match
+        case ie => nameOf[ie.Type] *: buildTypeNames(elems.tail.asInstanceOf[tail & Tuple.Tail[elems.type]])
+  transparent inline private def buildRpcNames[T: Done.Of as done](
+    bases: Tuple,
+  ): Proxy[T] =
+    // todo: add duplicates
+    TypeProxy(
+      buildResolveds[
+        NoDuplicates[bases.type],
+        Tuple.Map[NoDuplicates[bases.type], Occurrences0[bases.type]], // n * n time
+      ](
+        bases,
+        done.operations,
+      )(
+        using containsOnly.refl,
+        containsOnly.refl,
+        containsOnly.refl,
+        containsOnly.refl,
+      ),
+    )
+
+  transparent inline def materialize[T: Done.Of as done]: Proxy[T] =
+    buildRpcNames(buildBases(done.operations))
+
+
+  private def overloadedSuffixImpl[Elems <: Tuple: Type](using Quotes): Expr[String] =
     val sig = TupleTraverse
       .traverseTuple[Elems, InputElem]
       .map:
         case '[{ type Type = t }] => Type.show[t]
       .mkString("(", ",", ")")
     val hash = sig.hashCode & 0x7fffffff
-    s"_${hash.toHexString}"
+    Expr(s"_${hash.toHexString}")
 
-  /** Aborts compilation if two non-overload ops compute the same final name. */
-  private def detectDuplicates(labels: List[String], resolved: List[String])(using Quotes): Unit =
-    import quotes.reflect.*
-    resolved
-      .zip(labels)
-      .groupMap((name, _) => name)((_, label) => label)
-      .find((_, ls) => ls.sizeIs > 1)
-      .foreach: (name, ls) =>
-        report.errorAndAbort(
-          s"duplicate RPC name '$name' computed for methods ${ls.mkString(", ")}; disambiguate with @rpcName",
-        )
+  private type Occurrences0[Tup <: Tuple] = [T] =>> Tuple.Size[Tuple.Filter[
+    Tup,
+    [X] =>> X match
+      case T => true
+      case _ => false,
+  ]]
+
+  private type NoDuplicatesAcc[Tup <: Tuple, Acc <: Tuple] <: Tuple = Tup match
+    case EmptyTuple => Acc
+    case h *: t =>
+      Tuple.Contains[Acc, h] match
+        case true => NoDuplicatesAcc[t, Acc]
+        case false => NoDuplicatesAcc[t, Tuple.Concat[Acc, h *: EmptyTuple]]
+
+  private type NoDuplicates[Tup <: Tuple] = NoDuplicatesAcc[Tup, EmptyTuple]

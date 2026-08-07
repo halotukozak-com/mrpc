@@ -79,6 +79,8 @@ private[mrpc] def typeReprInfo(
      |type: ${tpe.show}
      |raw: $tpe
      |widen: ${tpe.widen.show}
+     |widen x2: ${tpe.widen.widen.show}
+     |widen x3: ${tpe.widen.widen.widen.show}
      |widenTermRefByName: ${tpe.widenTermRefByName.show}
      |widenByName: ${tpe.widenByName.show}
      |dealias: ${tpe.dealias.show}
@@ -139,6 +141,11 @@ private def showAstImpl(body: Expr[Any])(using quotes: Quotes): Expr[Nothing] =
   given Position = Position.NoPosition
   import quotes.reflect.*
   Printer.TreeShortCode.show(body.asTerm.underlyingArgument).dbg
+inline private[mrpc] def showType(inline body: Any) = ${ showTypeImpl('{ body }) }
+private def showTypeImpl(body: Expr[Any])(using quotes: Quotes): Expr[Nothing] =
+  given Position = Position.NoPosition
+  import quotes.reflect.*
+  typeReprInfo(body.asTerm.underlyingArgument.tpe).dbg
 
 inline private[mrpc] def showRawAst(inline body: Any) = ${ showRawAstImpl('{ body }) }
 

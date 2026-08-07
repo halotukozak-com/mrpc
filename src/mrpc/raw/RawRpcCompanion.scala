@@ -1,4 +1,5 @@
-package mrpc.raw
+package mrpc
+package raw
 
 import made.Done
 import mrpc.conv.{AsRaw, AsRawReal, AsReal}

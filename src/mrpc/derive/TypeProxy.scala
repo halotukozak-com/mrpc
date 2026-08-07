@@ -1,5 +1,6 @@
 package mrpc
-package derive
+
+import scala.quoted.{Expr, Quotes, Type}
 
 sealed trait TypeProxy:
   type Underlying
@@ -8,3 +9,11 @@ object TypeProxy:
 
   private val reusable = new TypeProxy {}
   def apply[T]: TypeProxy { type Underlying = T } = reusable.asInstanceOf[TypeProxy { type Underlying = T }]
+
+  transparent inline def apply[T](inline t: T): TypeProxy { type Underlying <: T } =
+    ${ applyImpl('t) }
+
+  private def applyImpl[T: Type](t: Expr[T])(using quotes: Quotes): Expr[TypeProxy { type Underlying <: T }] =
+    import quotes.reflect.*
+    t.asTerm.tpe.widen.asType match
+      case '[type t <: T; t] => '{ TypeProxy[t] }

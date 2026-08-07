@@ -28,7 +28,6 @@ object TraitMetaCmp extends RpcMetadataCompanion[TraitMetaCmp]
 // META2-02 @composite assertions: recursion against the SAME real symbol context.
 class CompositeMetadataSuite extends munit.FunSuite:
 
-
   private lazy val md: TraitMetaCmp[SampleApi] = TraitMetaCmp.materialize[SampleApi]
   private def method(source: String): MethodMetaCmp[?] =
     md.methods.find(_.nameInfo.name == source).get

@@ -18,11 +18,12 @@
 //> using options -Yexplain-lowlevel -Yexplicit-nulls
 //> using options -Yshow-suppressed-errors -Yshow-var-bounds
 //> using options -Wsafe-init -Werror -Wunused:all
-////> using options -Yprofile-enabled" -Yprofile-trace:debug/compile-trace.json"
 
-//> using options -Xmax-inlines 10000
-//> using options -Xprint-suspension
+//> using options -Xmax-inlines 100
+////> using options -Xprint-suspension
 
+
+//> using options -Yprofile-enabled -Yprofile-trace:debug.json
 //> using publish.organization io.github.halotukozak
 //> using publish.name mrpc
 //> using publish.computeVersion git:tag

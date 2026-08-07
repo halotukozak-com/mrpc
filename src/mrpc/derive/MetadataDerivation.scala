@@ -108,9 +108,9 @@ private[mrpc] object MetadataDerivation:
 
   inline private def fillAllParams(elems: Tuple)(using Context): Tuple = inline elems match
     case _: EmptyTuple => EmptyTuple
-    case _: (head *: tail2) =>
+    case _: (head *: tail) =>
       val head = elems.head.asInstanceOf[head & MadeElem]
-      val tail = elems.tail.asInstanceOf[tail2]
+      val tail = elems.tail.asInstanceOf[tail]
 
       realCons(fillParam(head), fillAllParams(tail))
 

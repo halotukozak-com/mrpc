@@ -112,26 +112,21 @@ object OpPlan:
   transparent inline private def buildParams(elems: Tuple)(using elems.type containsOnly InputElem): Tuple =
     inline elems match
       case _: EmptyTuple => EmptyTuple
-      case _: (h *: tail4) =>
+      case _: (head *: tail) =>
         realCons(
-          ParamPlan.materialize(elems.head.asInstanceOf[h & InputElem]),
-          buildParams(elems.tail.asInstanceOf[tail4 & Tuple.Tail[elems.type]]),
+          ParamPlan.materialize(elems.head.asInstanceOf[head & InputElem]),
+          buildParams(elems.tail.asInstanceOf[tail & Tuple.Tail[elems.type]]),
         )
 
 object Plans:
   private type Proxy0 = TypeProxy { type Underlying <: Tuple }
   opaque type Proxy[T] <: Proxy0 = Proxy0
 
-  transparent inline private def apply[T](inline plans: Tuple): Proxy[T] =
-    ${ applyImpl[T]('plans) }
+  given [T, Under <: Tuple, P <: Proxy[T] { type Underlying = Under }] => (Under containsOnly OpPlan) =
+    containsOnly.refl
 
-  private def applyImpl[T](plans: Expr[Tuple])(using quotes: Quotes): Expr[Proxy[T]] =
-    import quotes.reflect.*
-    plans.asTerm.tpe.widen.asType match
-      case '[type tup <: Tuple; tup] =>
-        '{ TypeProxy[tup] }
   transparent inline def materialize[T: {Done.Of as done}](names: RpcNames.Proxy[T]): Proxy[T] =
-    Plans(buildAll[names.Underlying](done.operations))
+    TypeProxy(buildAll[names.Underlying](done.operations))
 
   transparent inline private def buildAll[Names <: Tuple](
     operations: Tuple,

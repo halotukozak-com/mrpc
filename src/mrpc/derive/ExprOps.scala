@@ -1,7 +1,6 @@
 package mrpc
 package derive
 
-
 import scala.quoted.*
 
 /**
@@ -12,7 +11,7 @@ import scala.quoted.*
  * made's `handlers.to[Target]`.
  */
 extension (companion: Expr.type)
-  //maybe use realCons
+  // maybe use realCons
   private[mrpc] def ofRefinedTuple(exprs: List[Expr[?]])(using Quotes): Expr[Tuple] = exprs.runtimeChecked match
     case Nil => '{ EmptyTuple }
     case '{ $headExpr: h } :: tail =>
