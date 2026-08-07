@@ -23,11 +23,8 @@ import scala.concurrent.ExecutionContext
  */
 object AsRealDerivation:
 
-  inline def impl[Raw, Real: {Done.Of as done}](plans: Plans.Proxy[Real])(using ExecutionContext)
-    : AsReal[RawRpc[Raw], Real] =
-    implicit raw =>
-      given plans.Underlying containsOnly OpPlan = containsOnly.refl
-      buildAllHandlers[Raw, plans.Underlying].to[Real](using done)(using ValidHandlers.refl)
+  inline def impl[Raw, Real: {Done.Of as done}](plans: Tuple)(using ExecutionContext): AsReal[RawRpc[Raw], Real] =
+    raw => buildAllHandlers[Raw, plans.type](using raw, containsOnly.refl).to[Real](using done)(using ValidHandlers.refl)
 
   transparent inline private def buildAllHandlers[Raw: RawRpc, Plans <: Tuple](
     using Plans containsOnly OpPlan,

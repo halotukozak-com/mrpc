@@ -94,11 +94,13 @@ private[mrpc] object MetadataDerivation:
 
   inline def impl[M[_], Real, Ops <: Tuple](
     operations: Ops,
-    names: RpcNames.Proxy[Real],
-  )(using Ops containsOnly DoneOperation,
+    names: Tuple,
+  )(using
+    Ops containsOnly DoneOperation,
+    names.type containsOnly String,
   )(using made: Made.Of[M[Real]],
   ): M[Real] =
-    val ctx = Context.Trait[Ops, names.Underlying](operations)
+    val ctx = Context.Trait[Ops, names.type](operations)
     buildValue[M[Real]](using made, ctx)
 
   inline private def buildValue[M: Made.Of as made](using Context): M =

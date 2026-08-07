@@ -9,11 +9,6 @@ import scala.Tuple.Tail
 import scala.annotation.tailrec
 
 object RpcNames:
-  private type Proxy0 = TypeProxy { type Underlying <: Tuple }
-  opaque type Proxy[T] <: Proxy0 = Proxy0
-
-  given [T, Under <: Tuple, P <: Proxy[T] { type Underlying = Under }] => (Under containsOnly String) =
-    containsOnly.refl
   transparent inline private def buildBases(
     operations: Tuple,
   ): Tuple = inline operations match
@@ -139,7 +134,6 @@ object RpcNames:
     compiletime.requireConst(res)
     widen(res)
 
-
   private type FirstIndexOfAcc[Tup <: Tuple, T, N <: Int] = Tup match
     case T *: tail => N
     case _ *: tail => FirstIndexOfAcc[tail, T, N + 1]
@@ -174,26 +168,23 @@ object RpcNames:
         case ie => nameOf[ie.Type] *: buildTypeNames(elems.tail.asInstanceOf[tail & Tuple.Tail[elems.type]])
   transparent inline private def buildRpcNames[T: Done.Of as done](
     bases: Tuple,
-  ): Proxy[T] =
+  ): Tuple =
     // todo: add duplicates
-    TypeProxy(
-      buildResolveds[
-        NoDuplicates[bases.type],
-        Tuple.Map[NoDuplicates[bases.type], Occurrences0[bases.type]], // n * n time
-      ](
-        bases,
-        done.operations,
-      )(
-        using containsOnly.refl,
-        containsOnly.refl,
-        containsOnly.refl,
-        containsOnly.refl,
-      ),
+    buildResolveds[
+      NoDuplicates[bases.type],
+      Tuple.Map[NoDuplicates[bases.type], Occurrences0[bases.type]], // n * n time
+    ](
+      bases,
+      done.operations,
+    )(
+      using containsOnly.refl,
+      containsOnly.refl,
+      containsOnly.refl,
+      containsOnly.refl,
     )
 
-  transparent inline def materialize[T: Done.Of as done]: Proxy[T] =
+  transparent inline def materialize[T: Done.Of as done]: Tuple =
     buildRpcNames(buildBases(done.operations))
-
 
   private def overloadedSuffixImpl[Elems <: Tuple: Type](using Quotes): Expr[String] =
     val sig = TupleTraverse

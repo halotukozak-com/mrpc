@@ -119,14 +119,8 @@ object OpPlan:
         )
 
 object Plans:
-  private type Proxy0 = TypeProxy { type Underlying <: Tuple }
-  opaque type Proxy[T] <: Proxy0 = Proxy0
-
-  given [T, Under <: Tuple, P <: Proxy[T] { type Underlying = Under }] => (Under containsOnly OpPlan) =
-    containsOnly.refl
-
-  transparent inline def materialize[T: {Done.Of as done}](names: RpcNames.Proxy[T]): Proxy[T] =
-    TypeProxy(buildAll[names.Underlying](done.operations))
+  transparent inline def materialize[T: {Done.Of as done}](names: Tuple)(using names.type containsOnly String): Tuple =
+    buildAll[names.type](done.operations)
 
   transparent inline private def buildAll[Names <: Tuple](
     operations: Tuple,

@@ -1,7 +1,7 @@
 package mrpc
 package meta
 
-import made.{Done, Made}
+import made.{containsOnly, Done, Made}
 import mrpc.derive.RpcNames
 
 /**
@@ -26,4 +26,5 @@ import mrpc.derive.RpcNames
  */
 trait RpcMetadataCompanion[M[_]]:
   inline def materialize[Real: {Done.Of as done}](using made: Made.Of[M[Real]]): M[Real] =
-    mrpc.derive.MetadataDerivation.impl[M, Real, done.Operations](done.operations, RpcNames.materialize[Real])
+    mrpc.derive.MetadataDerivation
+      .impl[M, Real, done.Operations](done.operations, RpcNames.materialize[Real])(using summon, containsOnly.refl)
