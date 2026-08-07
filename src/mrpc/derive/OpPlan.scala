@@ -15,14 +15,12 @@ import scala.quoted.{Expr, Quotes, Type}
 private[derive] sealed class ArityTag
 private[derive] object ArityTag:
   object Fire extends ArityTag
-  class Call[Result] extends ArityTag
-  class Get[Sub] extends ArityTag
+  final class Call[Result] extends ArityTag
+  final class Get[Sub] extends ArityTag
 
 /** Type-level encode-vs-verbatim tag, classified the same way as [[ArityTag]]. */
-private[derive] sealed trait EncodingTag
-private[derive] object EncodingTag:
-  object Encoded extends EncodingTag
-  object Verbatim extends EncodingTag
+private[derive] enum EncodingTag:
+  case Encoded,Verbatim
 
 private[derive] sealed trait ParamPlan:
   type Label <: String
