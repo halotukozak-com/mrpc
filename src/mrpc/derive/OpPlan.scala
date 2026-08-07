@@ -24,10 +24,6 @@ private[derive] object EncodingTag:
   sealed trait Encoded extends EncodingTag
   sealed trait Verbatim extends EncodingTag
 
-/**
- * One parameter's plan, at the type level: its label, declared type, and encode-vs-verbatim tag.
- * [[OpPlan.Params]] is a `Tuple` of these — the parameter-level counterpart of [[OpPlan]] itself.
- */
 private[derive] sealed trait ParamPlan:
   type Label <: String
   type ParamType
@@ -45,20 +41,23 @@ object ParamPlan:
     // type is abstract vs. concrete isn't a named member to pattern-match on, so this stays reflect-API.
     Expr(TypeRepr.of[T].typeSymbol.isAbstractType)
 
-  transparent inline def materialize[Elem <: InputElem]: ParamPlan = inline compiletime.erasedValue[Elem] match
-    case ie =>
-      val encodingType =
-        inline if ie.hasAnnotation[mrpc.annotation.verbatim] && isRawCarrier[ie.Type]
-        then TypeProxy[EncodingTag.Verbatim]
-        else TypeProxy[EncodingTag.Encoded]
+  transparent inline private def encodingOf(ie: InputElem): TypeProxy { type Underlying <: EncodingTag } =
+    inline if ie.hasAnnotation[mrpc.annotation.verbatim] && isRawCarrier[ie.Type]
+    then TypeProxy[EncodingTag.Verbatim]
+    else TypeProxy[EncodingTag.Encoded]
 
-      reusable.asInstanceOf[
-        ParamPlan {
-          type Label = ie.Label;
-          type ParamType = ie.Type;
-          type Encoding = encodingType.Underlying
-        },
-      ]
+  inline def apply(ie: InputElem, encodingTag: TypeProxy)
+    : ParamPlan { type Label = ie.Label; type ParamType = ie.Type; type Encoding = encodingTag.Underlying } =
+    reusable.asInstanceOf[
+      ParamPlan {
+        type Label = ie.Label
+        type ParamType = ie.Type
+        type Encoding = encodingTag.Underlying
+      },
+    ]
+
+  transparent inline def materialize(ie: InputElem): ParamPlan =
+    apply(ie, encodingOf(ie))
 
 /**
  * One operation's classification, at the type level: arity, resolved rpcName, per-parameter encode
@@ -75,40 +74,20 @@ private[derive] sealed trait OpPlan:
   type ResultEncoding <: EncodingTag
   type OpType <: DoneOperation
 
-  final type Args = Tuple.Map[
-    Params,
-    [X] =>> X match
-      case ([p0] =>> ParamPlan { type ParamType = p0 })[p] => p,
-  ]
+  type Args <: Tuple
 
 object OpPlan:
 
   private val reusable = new OpPlan {}
-
-  /**
-   * [[OpPlan.Args]], off a still-abstract `Plan <: OpPlan` — `Plan#Args` (general type projection on a
-   * non-singleton prefix) is disallowed, and `Args` itself is a concrete alias (not a bare abstract
-   * member), so a match type can't refine it directly either; this recomputes it from `Params` (which
-   * IS abstract) instead. Only needed in ordinary (non-macro) declarations like [[Handler]]'s trait
-   * hierarchy; macro code just quote-pattern-matches `Type[Plan]` directly.
-   */
-  type ArgsOf[Plan <: OpPlan] = Plan match
-    case ([p <: Tuple] =>> OpPlan { type Params = p })[params] =>
-      Tuple.Map[
-        params,
-        [X] =>> X match
-          case ([p0] =>> ParamPlan { type ParamType = p0 })[p] => p,
-      ]
 
   transparent inline private def arityOf[Output]: TypeProxy = inline compiletime.erasedValue[Output] match
     case _: Unit => TypeProxy[ArityTag.Fire]
     case _: Future[x] => TypeProxy[ArityTag.Call[x]]
     case _ => TypeProxy[ArityTag.Get[Output]]
 
-  transparent inline def materialize[Op <: DoneOperation, Name <: String]: OpPlan =
-    inline compiletime.erasedValue[Op] match
-      case op =>
-        build[Op, Name, op.Label](arityOf[op.OutputType], buildParams[op.InputElems])
+  transparent inline def materialize[Name <: String](op: DoneOperation): OpPlan =
+    build[op.type, Name, op.Label](arityOf[op.OutputType], buildParams(op.inputElems))
+
   transparent inline def build[Op <: DoneOperation, Name <: String, label <: String](
     arity: TypeProxy,
     params: Tuple,
@@ -120,31 +99,50 @@ object OpPlan:
       type Params = params.type
       type ResultEncoding = EncodingTag.Encoded
       type OpType = Op
+      type Args = Tuple.Map[
+        params.type,
+        [X] =>> X match
+          case ([p0] =>> ParamPlan { type ParamType = p0 })[p] => p,
+      ]
     },
   ]
 
-  transparent inline private def buildParams[Acc <: Tuple](using Acc containsOnly InputElem): Tuple =
-    inline compiletime.erasedValue[Acc] match
+  transparent inline def buildParams(elems: Tuple)(using elems.type containsOnly InputElem): Tuple =
+    inline elems match
       case _: EmptyTuple => EmptyTuple
-      case _: (h *: tail) =>
-        buildParams[tail & Tuple.Tail[Acc]].realCons(ParamPlan.materialize[h & InputElem])
+      case _: (h *: tail4) =>
+        realCons(
+          ParamPlan.materialize(elems.head.asInstanceOf[h & InputElem]),
+          buildParams(elems.tail.asInstanceOf[tail4 & Tuple.Tail[elems.type]]),
+        )
 
 object Plans:
   private type Proxy0 = TypeProxy { type Underlying <: Tuple }
   opaque type Proxy[T] <: Proxy0 = Proxy0
 
-  given [T, Under <: Tuple, P <: Proxy[T] { type Underlying = Under }] => (Under containsOnly OpPlan) =
-    containsOnly.refl
+  transparent inline def apply[T](inline plans: Tuple): Proxy[T] =
+    ${ applyImpl[T]('plans) }
 
-  private def apply[T](plans: Tuple): Proxy[T] { type Underlying = plans.type } =
-    TypeProxy.apply[plans.type]
-
+  def applyImpl[T](plans: Expr[Tuple])(using quotes: Quotes): Expr[Proxy[T]] =
+    import quotes.reflect.*
+    plans.asTerm.tpe.widen.asType match
+      case '[type tup <: Tuple; tup] =>
+        '{ TypeProxy[tup] }
   transparent inline def materialize[T: {Done.Of as done}](names: RpcNames.Proxy[T]): Proxy[T] =
-    Plans(buildAll[Tuple.Zip[names.Underlying, done.Operations]])
+    Plans(buildAll[names.Underlying](done.operations))
 
-  transparent inline private def buildAll[Acc <: Tuple](
-    using Acc containsOnly (String, DoneOperation),
-  ): Tuple = inline compiletime.erasedValue[Acc] match
+  transparent inline def buildAll[Names <: Tuple](
+    operations: Tuple,
+  )(using
+    Names containsOnly String,
+    operations.type containsOnly DoneOperation,
+  ): Tuple = inline compiletime.erasedValue[Names] match
     case _: EmptyTuple => EmptyTuple
-    case _: ((name, op) *: next) =>
-      buildAll[next & Tuple.Tail[Acc]].realCons(OpPlan.materialize[op & DoneOperation, name & String])
+    case _: (name *: nextNames) =>
+      inline operations match
+        case _: EmptyTuple => EmptyTuple
+        case _: (h *: nextOps) =>
+          realCons(
+            OpPlan.materialize[name & String](operations.head.asInstanceOf[h & DoneOperation]),
+            buildAll[nextNames & Tuple.Tail[Names]](operations.tail.asInstanceOf[nextOps & Tuple.Tail[operations.type]]),
+          )
