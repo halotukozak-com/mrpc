@@ -131,14 +131,20 @@ divergence rather than pretend the two models are identical.
   interceptors, tagging-driven multi-raw-method routing) all fall out of. Not a
   bug — a named architecture boundary.
 
-## D10 — `@methodTag`/`@paramTag`/`@tagged`/`RpcTag` compile but are inert
+## D10 — `@methodTag`/`@paramTag`/`@tagged`/`RpcTag` have no dispatch effect (now a compile error)
 
 - **mrpc:** `methodTag`, `paramTag`, `tagged`, and the `RpcTag` base trait exist
-  as annotations (`src/mrpc/annotation/tags.scala`) and can be attached to real
-  methods/params — `test/mrpc/derive/SampleApi.scala`'s `RestTag`/`GET`/`POST`
-  hierarchy is carried "for API completeness" — but **no derivation or dispatch
-  code reads them**. They do not select between raw method variants, do not
-  filter matching, and have no effect on `fire`/`call`/`get` routing.
+  as annotations (`src/mrpc/annotation/tags.scala`) and are captured as
+  metadata (`AnnotationCaptureSuite`), but **no derivation or dispatch code
+  reads them for routing purposes** — they do not select between raw method
+  variants, do not filter matching, and have no effect on `fire`/`call`/`get`
+  routing. **Fixed (2026-08-08):** attaching any of them is now a compile
+  error instead of silently compiling to a no-op — a plain `hasAnnotation[X[?]]`
+  guard (the wildcard matches every instantiation despite `tagged`/`methodTag`/
+  `paramTag` being invariant in their type parameter) in `Plans.materialize`
+  (trait-level `@methodTag`/`@paramTag`, mirroring where `AnnotationCaptureSuite`
+  places them) and in `OpPlan.materialize`/`ParamPlan.encodingOf` (method-/
+  param-level `@tagged`) — see `test/mrpc/parity/TagAnnotationsRejectedSuite.scala`.
 - **commons:** `@methodTag`/`@paramTag` (declared on the raw trait) plus
   `@tagged[Tag](whenUntagged)` (declared on a raw method/param) actively steer
   which real methods/params a given raw method/param may match — this is how
@@ -148,12 +154,13 @@ divergence rather than pretend the two models are identical.
 - **Why:** tag-driven routing only makes sense against multiple raw method
   variants per real method, which requires the generic raw-method framework
   (D9). With a fixed three-method `RawRpc`, there is nothing for a tag to
-  select between.
-- **Parity treatment:** not wired, and **this is a landmine, not a silent
-  no-op** — a user attaching `@tagged`/`@methodTag`/`@paramTag` today gets no
-  compile error and no runtime effect. `test/mrpc/parity/TagAnnotationsInertSuite.scala`
-  locks in and documents this exact behavior so it cannot regress into a
-  half-working state unnoticed.
+  select between — but a silent no-op was a landmine, so it now fails loudly
+  instead.
+- **Parity treatment:** still not implemented (real tag-driven routing needs
+  D9 first); the gap is the same, only the failure mode changed from silent to
+  loud. `test/mrpc/parity/TagAnnotationsRejectedSuite.scala` locks in the
+  compile-error behavior for `@methodTag`/`@paramTag`/`@tagged` (method and
+  param position) so this cannot regress back to a silent no-op unnoticed.
 
 ## D11 — No encoding/decoding interceptors
 
