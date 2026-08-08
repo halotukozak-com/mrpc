@@ -9,7 +9,7 @@ on:
 # Local snapshot versions used across the publishLocal dev loop.
 # Keep these in sync with the `using dep` lines in project.scala.
 env:
-  MADE_VERSION: 0.1.3-done-SNAPSHOT
+  MADE_VERSION: 0.3.0
   MCODEC_VERSION: 0.0.0-done-SNAPSHOT
 
 jobs:
