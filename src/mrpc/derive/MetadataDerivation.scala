@@ -3,7 +3,7 @@ package derive
 
 import made.*
 
-import scala.annotation.Annotation
+import scala.annotation.{tailrec, Annotation}
 import scala.quoted.{Expr, Quotes, Type}
 
 /**
@@ -149,10 +149,13 @@ private[mrpc] object MetadataDerivation:
       inline ctx match
         case ctx: Context.Method => rpcParamMetadata[e.Type, e.Label](arity(e))(using ctx)
     else inline if e.hasAnnotation[mrpc.annotation.infer] then compiletime.summonInline[e.Type]
+    else inline if e.hasAnnotation[mrpc.annotation.reifyParamListCount] then reifyParamListCount
+    else inline if e.hasAnnotation[mrpc.annotation.isAnnotated[?]] then isAnnotated[e.Metadata]
     else
       compiletime.error(
         "metadata param '" + compiletime.constValue[e.Label] + "' has no recognized steering annotation " +
-          "(@composite/@reifyName/@reifyAnnot/@infer/@rpcMethodMetadata/@rpcParamMetadata)",
+          "(@composite/@reifyName/@reifyAnnot/@infer/@rpcMethodMetadata/@rpcParamMetadata/" +
+          "@isAnnotated/@reifyParamListCount)",
       )
 
   /**
@@ -288,6 +291,58 @@ private[mrpc] object MetadataDerivation:
               "@rpcMethodMetadata @single slot '" + compiletime.constValue[Name] +
                 "' requires exactly one match; got " + other.size,
             )
+
+  /** `@reifyParamListCount`: the current method's number of parameter lists. Method-level only. */
+  inline private def reifyParamListCount(using ctx: Context): Int = inline ctx match
+    case ctx: Context.Method => compiletime.constValue[Tuple.Size[ctx.op.ParamLists]]
+    case _ => compiletime.error("@reifyParamListCount is only valid at the method level")
+
+  /**
+   * `@isAnnotated[A]`: is the current RPC element (method or param) annotated with `A`? `A` is read off
+   * the metadata param's OWN `@isAnnotated[A]` annotation (via [[isAnnotatedImpl]]'s `SlotMeta` scan),
+   * not from the metadata param's declared type (which is plain `Boolean`, unlike `@reifyAnnot`'s
+   * type-driven arity). Presence is a plain yes/no regardless of how many matches there are.
+   */
+  inline private def isAnnotated[SlotMeta <: Tuple](using ctx: Context): Boolean = inline ctx match
+    case ctx: Context.Method => isAnnotatedForMethod[SlotMeta, ctx.op.Metadata]
+    case ctx: Context.Param => isAnnotatedForParam[SlotMeta, ctx.underlying.Metadata]
+    case _: Context.Trait => compiletime.error("@isAnnotated is not valid at the trait level")
+
+  inline private def isAnnotatedForMethod[SlotMeta <: Tuple, TargetMeta <: Tuple]: Boolean =
+    ${ isAnnotatedImpl[SlotMeta, TargetMeta] }
+  inline private def isAnnotatedForParam[SlotMeta <: Tuple, TargetMeta <: Tuple]: Boolean =
+    ${ isAnnotatedImpl[SlotMeta, TargetMeta] }
+
+  private def isAnnotatedImpl[SlotMeta <: Tuple: Type, TargetMeta <: Tuple: Type](using quotes: Quotes): Expr[Boolean] =
+    import quotes.reflect.*
+
+    val isAnnotatedSym = Symbol.classSymbol("mrpc.annotation.isAnnotated")
+
+    @tailrec
+    def findTarget[Tup <: Tuple: Type](using Quotes): TypeRepr =
+      Type.of[Tup] match
+        case '[EmptyTuple] =>
+          report.errorAndAbort("@isAnnotated[A]: no @isAnnotated annotation found on the metadata param's type chain")
+        case '[t *: ts] =>
+          TypeRepr.of[t] match
+            case AnnotatedType(_, annot) if annot.tpe.typeSymbol == isAnnotatedSym =>
+              annot.tpe match
+                case AppliedType(_, targ :: Nil) => targ
+                case other => report.errorAndAbort(s"@isAnnotated[A]: could not resolve A from $other")
+            case _ => findTarget[ts]
+
+    val target = findTarget[SlotMeta]
+
+    @tailrec
+    def isPresent[Tup <: Tuple: Type](using Quotes): Boolean =
+      Type.of[Tup] match
+        case '[EmptyTuple] => false
+        case '[t *: ts] =>
+          TypeRepr.of[t] match
+            case AnnotatedType(_, annot) if annot.tpe <:< target => true
+            case _ => isPresent[ts]
+
+    Expr(isPresent[TargetMeta])
 
   /**
    * `@rpcParamMetadata`: projects over the op's `inputElems` (declaration order). Same arity shaping as
