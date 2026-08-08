@@ -20,7 +20,7 @@ private[derive] object ArityTag:
 
 /** Type-level encode-vs-verbatim tag, classified the same way as [[ArityTag]]. */
 private[derive] enum EncodingTag:
-  case Encoded,Verbatim
+  case Encoded, Verbatim
 
 private[derive] sealed trait ParamPlan:
   type Label <: String
