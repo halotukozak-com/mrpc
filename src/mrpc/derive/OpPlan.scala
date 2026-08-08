@@ -39,9 +39,16 @@ object ParamPlan:
     // type is abstract vs. concrete isn't a named member to pattern-match on, so this stays reflect-API.
     Expr(TypeRepr.of[T].typeSymbol.isAbstractType)
 
+  // DIVERGENCES.md D10: `@tagged` has no tag-selection branch to steer under the fixed fire/call/get
+  // RawRpc (D9) — reject at compile time rather than silently ignore it. `tagged[?]` (a wildcard type
+  // arg) matches every instantiation regardless of `tagged`'s own invariance in its type parameter.
   transparent inline private def encodingOf(ie: InputElem): EncodingTag =
-    inline if ie.hasAnnotation[mrpc.annotation.verbatim] && isRawCarrier[ie.Type]
-    then EncodingTag.Verbatim
+    inline if ie.hasAnnotation[mrpc.annotation.tagged[?]] then
+      compiletime.error(
+        "@tagged has no effect: mrpc's fixed fire/call/get RawRpc has no tag-selection branch to " +
+          "steer (DIVERGENCES.md D10/D9). Remove the annotation.",
+      )
+    else inline if ie.hasAnnotation[mrpc.annotation.verbatim] && isRawCarrier[ie.Type] then EncodingTag.Verbatim
     else EncodingTag.Encoded
 
   inline def apply(ie: InputElem, encodingTag: EncodingTag)
@@ -84,8 +91,14 @@ object OpPlan:
     case _: Future[x] => ArityTag.Call[x]
     case _ => ArityTag.Get[Output]
 
+  // Same D10 rejection as `ParamPlan.encodingOf`, for a `@tagged` method instead of a `@tagged` param.
   transparent inline def materialize[Name <: String](op: DoneOperation): OpPlan =
-    build[op.type, Name, op.Label, op.ParamLists](arityOf[op.OutputType], buildParams(op.inputElems))
+    inline if op.hasAnnotation[mrpc.annotation.tagged[?]] then
+      compiletime.error(
+        "@tagged has no effect: mrpc's fixed fire/call/get RawRpc has no tag-selection branch to " +
+          "steer (DIVERGENCES.md D10/D9). Remove the annotation.",
+      )
+    else build[op.type, Name, op.Label, op.ParamLists](arityOf[op.OutputType], buildParams(op.inputElems))
 
   transparent inline def build[Op <: DoneOperation, Name <: String, label <: String, Lists <: Tuple](
     arity: ArityTag,
@@ -117,8 +130,21 @@ object OpPlan:
         )
 
 object Plans:
+  // DIVERGENCES.md D10: `@methodTag`/`@paramTag` (conventionally declared on the trait, mirroring
+  // AnnotationCaptureSuite's `@methodTag[RestTag](...) trait SampleApi`) have no tag-selection branch
+  // to steer under the fixed fire/call/get RawRpc (D9) — reject at compile time instead of ignoring.
   transparent inline def materialize[T: {Done.Of as done}](names: Tuple)(using names.type containsOnly String): Tuple =
-    buildAll[names.type](done.operations)
+    inline if done.hasAnnotation[mrpc.annotation.methodTag[?]] then
+      compiletime.error(
+        "@methodTag has no effect: mrpc's fixed fire/call/get RawRpc has no tag-selection branch to " +
+          "steer (DIVERGENCES.md D10/D9). Remove the annotation.",
+      )
+    else inline if done.hasAnnotation[mrpc.annotation.paramTag[?]] then
+      compiletime.error(
+        "@paramTag has no effect: mrpc's fixed fire/call/get RawRpc has no tag-selection branch to " +
+          "steer (DIVERGENCES.md D10/D9). Remove the annotation.",
+      )
+    else buildAll[names.type](done.operations)
 
   transparent inline private def buildAll[Names <: Tuple](
     operations: Tuple,
