@@ -8,15 +8,17 @@ import scala.compiletime.ops.int.{+, >}
 import scala.quoted.*
 import scala.Tuple.Tail
 import scala.annotation.tailrec
+import mrpc.annotation.*
 
 object RpcNames:
   transparent inline private def buildBases(
     operations: Tuple,
+  )(using operations.type containsOnly DoneOperation,
   ): Tuple = inline operations match
     case _: EmptyTuple => EmptyTuple
     case _: (head *: tail) =>
       val head = operations.head.asInstanceOf[head & DoneOperation]
-      realCons(head.base, buildBases(operations.tail.asInstanceOf[tail]))
+      realCons(head.base, buildBases(operations.tail.asInstanceOf[tail & Tail[operations.type]]))
 
   extension (op: DoneOperation)
     transparent inline private def base: String =
@@ -62,10 +64,10 @@ object RpcNames:
     bases: Tuple,
     operations: Tuple,
   )(using
-     bases.type containsOnly String,
-     operations.type containsOnly DoneOperation,
-     Names containsOnly String,
-     Values containsOnly Int,
+    bases.type containsOnly String,
+    operations.type containsOnly DoneOperation,
+    Names containsOnly String,
+    Values containsOnly Int,
   ): Tuple =
     inline operations match // for some reason it cannot match on (operations, bases)
       case _: EmptyTuple =>
@@ -115,19 +117,9 @@ object RpcNames:
             case prefix: String => prefix + base
         else base
 
-  transparent inline private def nameOf[T]: String = ${ nameOfImpl[T] }
-  private def nameOfImpl[T: Type](using Quotes) = Expr(Type.show[T])
-
-  transparent inline private def buildTypeNames(
-    elems: Tuple,
-  )(using elems.type containsOnly InputElem,
-  ): Tuple = inline elems match
-    case _: EmptyTuple => EmptyTuple
-    case _: (head *: tail) =>
-      inline compiletime.erasedValue[head & InputElem] match
-        case ie => nameOf[ie.Type] *: buildTypeNames(elems.tail.asInstanceOf[tail & Tuple.Tail[elems.type]])
   transparent inline private def buildRpcNames[T: Done.Of as done](
     bases: Tuple,
+  )(using bases.type containsOnly String,
   ): Tuple = checkDuplicates(
     buildResolveds[
       NoDuplicates[bases.type],
@@ -135,12 +127,7 @@ object RpcNames:
     ](
       bases,
       done.operations,
-    )(
-      using containsOnly.refl,
-      containsOnly.refl,
-      containsOnly.refl,
-      containsOnly.refl,
-    ),
+    )(using summon, summon, containsOnly.refl, containsOnly.refl),
   )
 
   inline private def checkDuplicates(result: Tuple): result.type =
@@ -149,7 +136,7 @@ object RpcNames:
     result
 
   transparent inline def materialize[T: Done.Of as done]: Tuple =
-    buildRpcNames(buildBases(done.operations))
+    buildRpcNames(buildBases(done.operations))(using done, containsOnly.refl)
 
   private def overloadedSuffixImpl[Elems <: Tuple: Type](using Quotes): Expr[String] =
     val sig = TupleTraverse

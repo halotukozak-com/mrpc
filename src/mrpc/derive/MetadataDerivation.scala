@@ -108,13 +108,14 @@ private[mrpc] object MetadataDerivation:
     val elems = fillAllParams(made.elems).asInstanceOf[p.ElemTypes] // todo: can we avoid this asInstanceOf?
     p.fromTuple(elems)
 
-  inline private def fillAllParams(elems: Tuple)(using Context): Tuple = inline elems match
-    case _: EmptyTuple => EmptyTuple
-    case _: (head *: tail) =>
-      val head = elems.head.asInstanceOf[head & MadeElem]
-      val tail = elems.tail.asInstanceOf[tail]
+  inline private def fillAllParams(elems: Tuple)(using Context)(using elems.type containsOnly MadeElem): Tuple =
+    inline elems match
+      case _: EmptyTuple => EmptyTuple
+      case _: (head *: tail) =>
+        val head = elems.head.asInstanceOf[head & MadeElem]
+        val tail = elems.tail.asInstanceOf[tail & Tuple.Tail[elems.type]]
 
-      realCons(fillParam(head), fillAllParams(tail))
+        realCons(fillParam(head), fillAllParams(tail))
 
   extension (e: MadeElem) transparent inline private def getUserRawName: Boolean = ${ getUserRawNameImpl[e.Metadata] }
 
@@ -221,24 +222,29 @@ private[mrpc] object MetadataDerivation:
    * Each element recurses `buildValue` in a per-op [[Context.Method]].
    */
 
-  inline private def buildAllMethodElems[e, Names <: Tuple](ops: Tuple)(using Names containsOnly String): Tuple =
+  inline private def buildAllMethodElems[e, Names <: Tuple](
+    ops: Tuple,
+  )(using Names containsOnly String,
+  )(using ops.type containsOnly DoneOperation,
+  ): Tuple =
     inline (ops, compiletime.erasedValue[Names]) match
       case (_: EmptyTuple, _: EmptyTuple) => EmptyTuple
       case (_: (opHead *: opTail), _: (nameHead *: nameTail)) =>
         val opHead = ops.head.asInstanceOf[opHead & DoneOperation]
-        val opTail = ops.tail.asInstanceOf[opTail]
+        val opTail = ops.tail.asInstanceOf[opTail & Tuple.Tail[ops.type]]
         realCons(
           buildElem[e, opHead.Type](using Context.Method[nameHead & String, opHead & DoneOperation](opHead)),
           buildAllMethodElems[e, Tuple.Tail[Names]](opTail),
         )
 
-  inline private def buildAllParamElems[e](params: Tuple): Tuple = inline params match
-    case _: EmptyTuple => EmptyTuple
-    case _: (head *: tail) =>
-      val head = params.head.asInstanceOf[head & InputElem]
-      val tail = params.tail.asInstanceOf[tail]
+  inline private def buildAllParamElems[e](params: Tuple)(using params.type containsOnly InputElem): Tuple =
+    inline params match
+      case _: EmptyTuple => EmptyTuple
+      case _: (head *: tail) =>
+        val head = params.head.asInstanceOf[head & InputElem]
+        val tail = params.tail.asInstanceOf[tail & Tuple.Tail[params.type]]
 
-      realCons(buildElem[e, head.Type](using Context.Param(head)), buildAllParamElems[e](tail))
+        realCons(buildElem[e, head.Type](using Context.Param(head)), buildAllParamElems[e](tail))
 
   inline private def buildElem[elem <: AnyKind, T](using ctx: Context) = ${ buildElemImpl[elem, T]('ctx) }
 
