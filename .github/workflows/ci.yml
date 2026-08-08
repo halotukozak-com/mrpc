@@ -28,7 +28,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           repository: halotukozak/made
-          ref: 16bfbdbd7022e644e8f803be864c0c98ef53ac15
+          ref: a61445c5ecc90d165184cb33e948e3c71a44becc # v0.3.0
           path: made
 
       - name: Checkout mcodec
