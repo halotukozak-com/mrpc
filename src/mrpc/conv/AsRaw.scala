@@ -7,7 +7,7 @@ import scala.util.Try
 trait AsRaw[Raw, Real]:
   def asRaw(real: Real): Raw
 
-object AsRaw:
+object AsRaw extends AsRawLowPrio:
   def apply[Raw, Real](using instance: AsRaw[Raw, Real]): AsRaw[Raw, Real] = instance
 
   given identity[A]: AsRaw[A, A] = (a: A) => a
@@ -32,3 +32,7 @@ object AsRaw:
   def makeLazy[Raw, Real](conv: => AsRaw[Raw, Real]): AsRaw[Raw, Real] = new AsRaw[Raw, Real]:
     private lazy val c = conv
     def asRaw(real: Real): Raw = c.asRaw(real)
+
+/** Lowest-priority instances, so a `Fallback[AsRaw[Raw, Real]]` never out-competes a normal given. */
+private[conv] trait AsRawLowPrio:
+  given fromFallback[Raw, Real](using fallback: Fallback[AsRaw[Raw, Real]]): AsRaw[Raw, Real] = fallback.value
