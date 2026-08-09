@@ -58,4 +58,7 @@ jobs:
         run: scala-cli --power fmt --check mrpc
 
       - name: Run tests
-        run: scala-cli --power test mrpc
+        # GoldenFixtureSuite reads fixtures/*.json by a path relative to the working directory, which
+        # must therefore be mrpc/ itself (not the outer checkout root the other steps run from).
+        working-directory: mrpc
+        run: scala-cli --power test .
