@@ -2,6 +2,7 @@
 .planning/
 .bsp/
 .scala-build/
+scala-doc
 
 # IntelliJ IDEA project files
 .idea/
