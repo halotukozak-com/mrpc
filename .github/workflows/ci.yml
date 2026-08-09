@@ -2,9 +2,9 @@ name: Run CI
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main ]
   pull_request:
-    branches: [ main, master ]
+    branches: [ main ]
 
 # Local snapshot versions used across the publishLocal dev loop.
 # Keep these in sync with the `using dep` lines in project.scala.
