@@ -35,7 +35,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           repository: halotukozak/mcodec
-          ref: 4f4ece438b766f18558cb42ccaf5df894bfed4ff
+          ref: 95c51f5556531760c3f0f422170aaf9e6a3c2aae # fix-made-0.3.0-compat, until halotukozak/mcodec#4 merges
           path: mcodec
 
       - name: Setup coursier cache
