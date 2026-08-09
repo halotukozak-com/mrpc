@@ -22,7 +22,6 @@
 //> using options -Xmax-inlines 100
 ////> using options -Xprint-suspension
 
-
 //> using options -Yprofile-enabled -Yprofile-trace:debug.json
 //> using publish.organization io.github.halotukozak
 //> using publish.name mrpc
