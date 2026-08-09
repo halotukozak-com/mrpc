@@ -18,21 +18,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout mrpc
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           path: mrpc
 
       # Pinned upstream commits. made is consumed from a feature branch until
       # its PR merges; bump these SHAs to the merged refs afterwards.
       - name: Checkout made
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: halotukozak/made
           ref: 16bfbdbd7022e644e8f803be864c0c98ef53ac15
           path: made
 
       - name: Checkout mcodec
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: halotukozak/mcodec
           ref: 4f4ece438b766f18558cb42ccaf5df894bfed4ff
