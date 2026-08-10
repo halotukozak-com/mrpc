@@ -198,8 +198,8 @@ private[mrpc] object MetadataDerivation:
    * been widened to the bare `Context` supertype.
    */
   inline private def allTerms[A](using Context): List[A] = inline ctx match
-    case ctx: Context.Method => getAllAnnotations(ctx.op)(using containsOnly.refl)[A & Annotation]
-    case ctx: Context.Param => getAllAnnotations(ctx.underlying)(using containsOnly.refl)[A & Annotation]
+    case ctx: Context.Method => ctx.op.getAllAnnotations[A & Annotation]
+    case ctx: Context.Param => ctx.underlying.getAllAnnotations[A & Annotation]
     case _: Context.Trait => compiletime.error("@reifyAnnot is not valid at the trait level")
 
   inline private def reifyAnnot[Param](arity: SlotArity)(using Context): Any =
