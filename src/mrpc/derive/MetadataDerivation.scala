@@ -297,12 +297,8 @@ private[mrpc] object MetadataDerivation:
     case ctx: Context.Method => compiletime.constValue[Tuple.Size[ctx.op.ParamLists]]
     case _ => compiletime.error("@reifyParamListCount is only valid at the method level")
 
-  /**
-   * `@isAnnotated[A]`: is the current RPC element (method or param) annotated with `A`? `A` is read off
-   * the metadata param's OWN `@isAnnotated[A]` annotation (via [[isAnnotatedImpl]]'s `SlotMeta` scan),
-   * not from the metadata param's declared type (which is plain `Boolean`, unlike `@reifyAnnot`'s
-   * type-driven arity). Presence is a plain yes/no regardless of how many matches there are.
-   */
+  // `A` is read off the metadata param's own @isAnnotated[A] annotation, not its declared type
+  // (always Boolean) — unlike @reifyAnnot, whose arity comes from the slot's type.
   inline private def isAnnotated[SlotMeta <: Tuple](using ctx: Context): Boolean = inline ctx match
     case ctx: Context.Method => isAnnotatedForMethod[SlotMeta, ctx.op.Metadata]
     case ctx: Context.Param => isAnnotatedForParam[SlotMeta, ctx.underlying.Metadata]

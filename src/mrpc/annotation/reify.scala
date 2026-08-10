@@ -37,21 +37,10 @@ private[mrpc] object reifyName:
 final class reifyAnnot extends MetaAnnotation
 
 /**
- * Steers a metadata-class constructor parameter (of type `Boolean`) to hold whether the RPC element
- * carries an annotation of type `A`, regardless of arity — presence is a plain yes/no, unlike
- * `@reifyAnnot`'s single/optional/multi extraction. Mirrors commons `isAnnotated[A]`.
- *
- * Read by reflection on the metadata class's constructor params, so this is a plain
- * [[scala.annotation.StaticAnnotation]].
+ * Steers a `Boolean` metadata param to hold whether the RPC element carries an annotation of type `A`
+ * — a plain yes/no, unlike `@reifyAnnot`'s single/optional/multi extraction. Mirrors commons `isAnnotated[A]`.
  */
 final class isAnnotated[A] extends MetaAnnotation
 
-/**
- * Steers a metadata-class constructor parameter (of type `Int`) to hold the number of parameter lists
- * of the current RPC method. Valid only at the method level (mirrors [[reifyName]]'s per-context
- * restriction). Mirrors commons `reifyParamListCount`.
- *
- * Read by reflection on the metadata class's constructor params, so this is a plain
- * [[scala.annotation.StaticAnnotation]].
- */
+/** Steers an `Int` metadata param to hold the current method's parameter-list count. Method-level only. */
 final class reifyParamListCount extends MetaAnnotation
