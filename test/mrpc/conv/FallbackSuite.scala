@@ -2,6 +2,8 @@ package mrpc.conv
 
 import mrpc.Fallback
 
+import scala.annotation.unused
+
 /**
  * DIVERGENCES.md D17: `Fallback[T]` lowers an implicit's priority below normal givens. Proves both
  * halves — a `Fallback`-wrapped instance is picked up when nothing else resolves, AND a normal given
@@ -17,7 +19,8 @@ class FallbackSuite extends munit.FunSuite:
     assertEquals(summon[AsRaw[String, Wrapped]].asRaw(Wrapped("x")), "x")
 
   test("AsRaw: a normal given wins over a Fallback-wrapped competitor, no ambiguity"):
-    given Fallback[AsRaw[String, Wrapped]] = Fallback((_: Wrapped) => "from-fallback")
+    // Present but never actually resolved — that's exactly the point being asserted below.
+    @unused given Fallback[AsRaw[String, Wrapped]] = Fallback((_: Wrapped) => "from-fallback")
     given AsRaw[String, Wrapped] = (w: Wrapped) => "from-normal:" + w.s
     assertEquals(summon[AsRaw[String, Wrapped]].asRaw(Wrapped("x")), "from-normal:x")
 
@@ -26,7 +29,8 @@ class FallbackSuite extends munit.FunSuite:
     assertEquals(summon[AsReal[String, Wrapped]].asReal("x"), Wrapped("x"))
 
   test("AsReal: a normal given wins over a Fallback-wrapped competitor, no ambiguity"):
-    given Fallback[AsReal[String, Wrapped]] = Fallback((_: String) => Wrapped("from-fallback"))
+    // Present but never actually resolved — that's exactly the point being asserted below.
+    @unused given Fallback[AsReal[String, Wrapped]] = Fallback((_: String) => Wrapped("from-fallback"))
     given AsReal[String, Wrapped] = (s: String) => Wrapped("from-normal:" + s)
     assertEquals(summon[AsReal[String, Wrapped]].asReal("x"), Wrapped("from-normal:x"))
 
@@ -37,7 +41,8 @@ class FallbackSuite extends munit.FunSuite:
     assertEquals(instance.asReal("x"), Wrapped("x"))
 
   test("AsRawReal: fromSeparate (built from AsRaw+AsReal givens) wins over a Fallback competitor"):
-    given Fallback[AsRawReal[String, Wrapped]] =
+    // Present but never actually resolved — that's exactly the point being asserted below.
+    @unused given Fallback[AsRawReal[String, Wrapped]] =
       Fallback(AsRawReal.create[String, Wrapped](_ => "from-fallback", _ => Wrapped("from-fallback")))
     given AsRaw[String, Wrapped] = (w: Wrapped) => "from-separate:" + w.s
     given AsReal[String, Wrapped] = (s: String) => Wrapped("from-separate:" + s)

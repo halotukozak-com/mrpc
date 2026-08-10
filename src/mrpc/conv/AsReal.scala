@@ -1,5 +1,7 @@
 package mrpc.conv
 
+import mrpc.Fallback
+
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.Try
 

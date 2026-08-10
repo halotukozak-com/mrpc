@@ -3,6 +3,8 @@ package mrpc.meta
 import mrpc.Fallback
 import mrpc.derive.SampleApi.SampleApi
 
+import scala.annotation.unused
+
 /**
  * DIVERGENCES.md D17: `RpcMetadataCompanion.fromFallback` mirrors commons `MetadataCompanion.fromFallback` —
  * a `Fallback[M[Real]]` resolves via implicit search when no normal `given M[Real]` is in scope, but a
@@ -19,6 +21,7 @@ class MetadataFallbackSuite extends munit.FunSuite:
     assertEquals(summon[SimpleMeta[SampleApi]].tag, "from-fallback")
 
   test("a normal given wins over a Fallback-wrapped competitor, no ambiguity"):
-    given Fallback[SimpleMeta[SampleApi]] = Fallback(SimpleMeta("from-fallback"))
+    // Present but never actually resolved — that's exactly the point being asserted below.
+    @unused given Fallback[SimpleMeta[SampleApi]] = Fallback(SimpleMeta("from-fallback"))
     given SimpleMeta[SampleApi] = SimpleMeta("from-normal")
     assertEquals(summon[SimpleMeta[SampleApi]].tag, "from-normal")
