@@ -1,0 +1,52 @@
+name: Deploy documentation to Pages
+
+on:
+  push:
+    tags:
+      - 'v*'
+    branches: [ "master" ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Setup coursier cache
+        uses: coursier/cache-action@v8.1
+      - name: Setup scala-cli
+        uses: VirtusLab/scala-cli-setup@v1
+      - name: Generate documentation
+        run: |
+          scala-cli --power doc . -- \
+          -project "mrpc" \
+          -project-version ${{ github.ref_name }} \
+          -project-footer "made with ❤️ and coffee" \
+          -social-links:github::https://github.com/halotukozak/mrpc \
+          -snippet-compiler:compile \
+          -source-links:"src=github://halotukozak/mrpc?tag=${{ github.ref_name }}" \
+          -revision:${{ github.ref_name }}
+      - name: Setup Pages
+        uses: actions/configure-pages@v6
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: 'scala-doc'
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5
