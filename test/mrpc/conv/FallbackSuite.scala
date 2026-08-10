@@ -37,7 +37,8 @@ class FallbackSuite extends munit.FunSuite:
     assertEquals(instance.asReal("x"), Wrapped("x"))
 
   test("AsRawReal: fromSeparate (built from AsRaw+AsReal givens) wins over a Fallback competitor"):
-    given Fallback[AsRawReal[String, Wrapped]] = Fallback(AsRawReal.create[String, Wrapped](_ => "from-fallback", _ => Wrapped("from-fallback")))
+    given Fallback[AsRawReal[String, Wrapped]] =
+      Fallback(AsRawReal.create[String, Wrapped](_ => "from-fallback", _ => Wrapped("from-fallback")))
     given AsRaw[String, Wrapped] = (w: Wrapped) => "from-separate:" + w.s
     given AsReal[String, Wrapped] = (s: String) => Wrapped("from-separate:" + s)
     val instance = summon[AsRawReal[String, Wrapped]]
