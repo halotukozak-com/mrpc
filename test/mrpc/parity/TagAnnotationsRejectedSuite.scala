@@ -1,17 +1,9 @@
 package mrpc.parity
 
 /**
- * Locks in DIVERGENCES.md D10 (post-fix state): `@methodTag`/`@paramTag`/`@tagged` used to compile
- * and silently do nothing under mrpc's fixed fire/call/get `RawRpc` (D9 — there is no tag-selection
- * branch for them to steer, unlike commons' generic raw-method framework). That silent-no-op landmine
- * is now a compile error instead (`hasAnnotation[X[?]]` guards in `Plans.materialize` and
- * `OpPlan.materialize`/`ParamPlan.encodingOf`), so a reader can't mistake "this compiles"
- * for "this routes by tag". This suite proves the compile error fires for all three annotations, at
- * both the method and the param level, once the trait is actually materialized (the guard runs during
- * `Plans.materialize`, reached from `materializeAsRaw`/`materializeAsReal`).
- *
- * The underlying gap — real tag-driven routing between several raw method/param variants — is still
- * not implemented; that requires the generic raw-method framework of D9 first.
+ * `@methodTag`/`@paramTag`/`@tagged` used to compile and silently do nothing under mrpc's fixed
+ * fire/call/get `RawRpc` (D9/D10). Now they're a compile error instead. Real tag-driven routing still
+ * needs the generic raw-method framework.
  */
 class TagAnnotationsRejectedSuite extends munit.FunSuite:
 
