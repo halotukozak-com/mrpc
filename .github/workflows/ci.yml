@@ -8,8 +8,11 @@ on:
 
 # mcodec's fix for made 0.3.0 compat isn't released yet, so it's still built from
 # a pinned commit and published locally. made itself is resolved straight from
-# Maven Central (see project.scala) now that v0.3.0 is out.
+# Maven Central (see project.scala) now that v0.3.0 is out -- but the pinned
+# mcodec commit's own project.scala still declares the older made:0.1.3, so it
+# gets repointed to made:0.3.0 below before publishing.
 env:
+  MADE_VERSION: 0.3.0
   MCODEC_VERSION: 0.0.0-done-SNAPSHOT
 
 jobs:
@@ -34,6 +37,10 @@ jobs:
         uses: coursier/cache-action@v8.1
 
       - uses: VirtusLab/scala-cli-setup@v1
+
+      # The pinned mcodec commit's project.scala still points at made:0.1.3.
+      - name: Repoint mcodec onto made from Maven Central
+        run: sed -i -E 's#(io\.github\.halotukozak::made:)[^[:space:]]+#\1'"$MADE_VERSION"'#' mcodec/project.scala
 
       - name: Publish mcodec locally
         run: scala-cli --power publish local mcodec --project-version "$MCODEC_VERSION"
