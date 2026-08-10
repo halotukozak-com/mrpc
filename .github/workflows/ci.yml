@@ -6,56 +6,20 @@ on:
   pull_request:
     branches: [ main ]
 
-# Local snapshot versions used across the publishLocal dev loop.
-# Keep these in sync with the `using dep` lines in project.scala.
-env:
-  MADE_VERSION: 0.1.3-done-SNAPSHOT
-  MCODEC_VERSION: 0.0.0-done-SNAPSHOT
-
 jobs:
   build:
     name: Build and test
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout mrpc
-        uses: actions/checkout@v6
-        with:
-          path: mrpc
-
-      # Pinned upstream commits. made is consumed from a feature branch until
-      # its PR merges; bump these SHAs to the merged refs afterwards.
-      - name: Checkout made
-        uses: actions/checkout@v6
-        with:
-          repository: halotukozak/made
-          ref: 16bfbdbd7022e644e8f803be864c0c98ef53ac15
-          path: made
-
-      - name: Checkout mcodec
-        uses: actions/checkout@v6
-        with:
-          repository: halotukozak/mcodec
-          ref: 4f4ece438b766f18558cb42ccaf5df894bfed4ff
-          path: mcodec
+      - uses: actions/checkout@v6
 
       - name: Setup coursier cache
         uses: coursier/cache-action@v8.1
 
       - uses: VirtusLab/scala-cli-setup@v1
 
-      - name: Publish made locally
-        run: scala-cli --power publish local made --project-version "$MADE_VERSION"
-
-      # mcodec must resolve the same made artifact so there is exactly one
-      # made typeclass set on the classpath.
-      - name: Repoint mcodec onto the local made
-        run: sed -i -E 's#(io\.github\.halotukozak::made:)[^[:space:]]+#\1'"$MADE_VERSION"'#' mcodec/project.scala
-
-      - name: Publish mcodec locally
-        run: scala-cli --power publish local mcodec --project-version "$MCODEC_VERSION"
-
       - name: Check formatting
-        run: scala-cli --power fmt --check mrpc
+        run: scala-cli --power fmt --check .
 
       - name: Run tests
-        run: scala-cli --power test mrpc
+        run: scala-cli --power test .
