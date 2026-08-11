@@ -2,6 +2,7 @@ package mrpc
 package derive
 
 import scala.quoted.*
+import commons.typeInfo
 
 /**
  * Type-level tuple traversal used by the matcher to walk `Done.Operations`, an op's `InputElems`,
@@ -15,13 +16,3 @@ private[derive] object TupleTraverse:
     case '[type t <: T; *:[t, ts]] => Type.of[t] :: traverseTuple[ts, T]
     case '[other] => throw MatchError(typeInfo[other])
 
-  /** Folds element types into a `*:`-cons tuple type, in order — the inverse of [[traverseTuple]]. */
-  def foldTuple(elems: List[Type[?]])(using Quotes): Type[? <: Tuple] =
-    import quotes.reflect.*
-    val folded: TypeRepr = elems.foldRight(TypeRepr.of[EmptyTuple]) { (elem, acc) =>
-      (elem, acc.asType) match
-        case ('[h], '[type t <: Tuple; t]) => TypeRepr.of[h *: t]
-        case _ => acc
-    }
-    folded.asType match
-      case '[type r <: Tuple; r] => Type.of[r]

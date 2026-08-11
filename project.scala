@@ -1,5 +1,6 @@
 //> using scala 3.8.4
 
+//> using dep io.github.halotukozak::commons:0.1.0-SNAPSHOT
 //> using dep io.github.halotukozak::made:0.3.0
 //> using dep io.github.halotukozak::mcodec:0.1.0
 

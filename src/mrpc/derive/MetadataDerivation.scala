@@ -5,6 +5,7 @@ import made.*
 
 import scala.annotation.Annotation
 import scala.quoted.{Expr, Quotes, Type}
+import commons.realCons
 
 /**
  * The metadata-class-param-driven `materialize` macro. Unlike a blind `Done`-walk emitting a fixed flat

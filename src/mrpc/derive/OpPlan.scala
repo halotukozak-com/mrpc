@@ -5,6 +5,7 @@ import made.*
 
 import scala.concurrent.Future
 import scala.quoted.{Expr, Quotes, Type}
+import commons.realCons
 
 /**
  * Type-level tag for which `RawRpc` dispatch method (`fire`/`call`/`get`) an operation routes to.
