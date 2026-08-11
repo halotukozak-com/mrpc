@@ -9,6 +9,7 @@ import scala.quoted.*
 import scala.Tuple.Tail
 import scala.annotation.tailrec
 import mrpc.annotation.*
+import commons.realCons
 
 object RpcNames:
   transparent inline private def buildBases(

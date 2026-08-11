@@ -6,6 +6,7 @@ import mrpc.conv.AsReal
 import mrpc.raw.RawRpc
 
 import scala.concurrent.ExecutionContext
+import commons.realCons
 
 /**
  * Client-proxy derivation: builds an `AsReal[RawRpc[Raw], Real]` that turns a transport-facing
