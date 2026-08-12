@@ -1,7 +1,6 @@
 package mrpc
 package derive
 
-import mrpc.conv.{AsRaw, AsReal}
 import mrpc.derive.SampleApi.*
 import mrpc.raw.RawRpc
 import org.scalacheck.{Arbitrary, Gen}
@@ -45,13 +44,10 @@ class RoundTripLawProps extends munit.ScalaCheckSuite:
     def echoBool(b: Boolean): Future[Boolean] = Future.successful(b)
     def findRenamed(id: Int): Future[User] = Future.successful(User(id, "renamed"))
 
-  // Non-recursive sub-RPC conversions the get seam summons.
-  private given AsRaw[RawRpc[String], UsersRpc] = SampleApiCodec.materializeAsRaw[UsersRpc]
-  private given AsReal[RawRpc[String], UsersRpc] = SampleApiCodec.materializeAsReal[UsersRpc]
-
-  // real -> raw -> real: the full materialized stack the law runs every generated input through.
-  private val rawRpc: RawRpc[String] = { SampleApiCodec.materializeAsRaw[SampleApi] }.asRaw(impl)
-  private val proxy: SampleApi = SampleApiCodec.materializeAsReal[SampleApi].asReal(rawRpc)
+  // real -> raw -> real: the full materialized stack the law runs every generated input through
+  // (derived once in `SampleApiCodec`, including the `users` get-arm's sub-RPC conversion, and shared).
+  private val rawRpc: RawRpc[String] = SampleApiCodec.sampleApiRaw.asRaw(impl)
+  private val proxy: SampleApi = SampleApiCodec.sampleApiReal.asReal(rawRpc)
 
   private def await[A](f: Future[A]): A = Await.result(f, Duration.Inf)
 

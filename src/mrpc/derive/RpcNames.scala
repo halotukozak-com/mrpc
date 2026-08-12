@@ -1,15 +1,15 @@
 package mrpc
 package derive
 
+import commons.*
 import made.*
 import made.annotation.MetaAnnotation
+import mrpc.annotation.*
 
 import scala.compiletime.ops.int.{+, >}
 import scala.quoted.*
 import scala.Tuple.Tail
 import scala.annotation.tailrec
-import mrpc.annotation.*
-import commons.realCons
 
 object RpcNames:
   transparent inline private def buildBases(
@@ -61,14 +61,12 @@ object RpcNames:
 
   /**
    */
-  transparent inline private def buildResolveds[Names <: Tuple, Values <: Tuple](
+  transparent inline private def buildResolveds[Names <: Tuple: Of[String], Values <: Tuple: Of[Int]](
     bases: Tuple,
     operations: Tuple,
   )(using
     bases.type containsOnly String,
     operations.type containsOnly DoneOperation,
-    Names containsOnly String,
-    Values containsOnly Int,
   ): Tuple =
     inline operations match // for some reason it cannot match on (operations, bases)
       case _: EmptyTuple =>
@@ -128,7 +126,7 @@ object RpcNames:
     ](
       bases,
       done.operations,
-    )(using summon, summon, containsOnly.refl, containsOnly.refl),
+    )(using containsOnly.refl, containsOnly.refl),
   )
 
   inline private def checkDuplicates(result: Tuple): result.type =

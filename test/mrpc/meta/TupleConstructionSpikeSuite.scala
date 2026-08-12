@@ -1,7 +1,9 @@
-package mrpc.meta
+package mrpc
+package meta
 
 import made.*
 import mrpc.derive.SampleApi.SampleApi
+import commons.*
 
 /**
  * Wave-0 type-preserving tuple-construction spike (Phase 10, Plan 01, Task 3).

@@ -42,7 +42,7 @@ object Handler:
   ): Any =
     val invocation = RawInvocation[Raw](
       compiletime.constValue[Name],
-      splitBySizes(encodeArgs[Raw](tup), scala.compiletime.constValueTuple[Lists].toList.asInstanceOf[List[Int]]),
+      splitBySizes(encodeArgs[Raw](tup), compiletime.constValueTuple[Lists].toList.asInstanceOf[List[Int]]),
     )
     inline compiletime.erasedValue[Plan] match
       case plan =>

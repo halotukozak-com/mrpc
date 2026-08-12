@@ -1,11 +1,11 @@
 package mrpc
 package derive
 
+import commons.*
 import made.*
 
 import scala.annotation.Annotation
 import scala.quoted.{Expr, Quotes, Type}
-import commons.realCons
 
 /**
  * The metadata-class-param-driven `materialize` macro. Unlike a blind `Done`-walk emitting a fixed flat
@@ -59,7 +59,7 @@ private[mrpc] object MetadataDerivation:
       // per-op refined types (and with them, each op's captured `Metadata`) at the parameter
       // boundary; `ops.type` inside the return type then just resolves back to that widened `Tuple`.
       // A type parameter, inferred from the argument's OWN static type, preserves it end-to-end.
-      def apply[ops <: Tuple, names <: Tuple](ops0: ops)(using ops containsOnly DoneOperation, names containsOnly String)
+      def apply[ops <: Tuple: Of[DoneOperation], names <: Tuple: Of[String]](ops0: ops)
         : Trait { type Ops = ops; type Names = names } = new Trait:
         override type Names = names
         override type Ops = ops
@@ -93,12 +93,10 @@ private[mrpc] object MetadataDerivation:
         override type P = pT
         override val underlying: pT = p
 
-  inline def impl[M[_], Real, Ops <: Tuple](
+  inline def impl[M[_], Real, Ops <: Tuple: Of[DoneOperation]](
     operations: Ops,
     names: Tuple,
-  )(using
-    Ops containsOnly DoneOperation,
-    names.type containsOnly String,
+  )(using names.type containsOnly String,
   )(using made: Made.Of[M[Real]],
   ): M[Real] =
     val ctx = Context.Trait[Ops, names.type](operations)
@@ -223,9 +221,8 @@ private[mrpc] object MetadataDerivation:
    * Each element recurses `buildValue` in a per-op [[Context.Method]].
    */
 
-  inline private def buildAllMethodElems[e, Names <: Tuple](
+  inline private def buildAllMethodElems[e, Names <: Tuple: Of[String]](
     ops: Tuple,
-  )(using Names containsOnly String,
   )(using ops.type containsOnly DoneOperation,
   ): Tuple =
     inline (ops, compiletime.erasedValue[Names]) match

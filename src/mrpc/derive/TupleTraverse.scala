@@ -15,4 +15,3 @@ private[derive] object TupleTraverse:
     case '[EmptyTuple] => Nil
     case '[type t <: T; *:[t, ts]] => Type.of[t] :: traverseTuple[ts, T]
     case '[other] => throw MatchError(typeInfo[other])
-
