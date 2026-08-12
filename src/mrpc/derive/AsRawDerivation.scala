@@ -1,12 +1,12 @@
 package mrpc
 package derive
 
-import made.{containsOnly, Done, DoneOperation}
+import commons.{containsOnly, realCons, Of}
+import made.{Done, DoneOperation}
 import mrpc.conv.{AsRaw, AsReal}
 import mrpc.raw.{RawInvocation, RawRpc}
 
 import scala.concurrent.{ExecutionContext, Future}
-import commons.realCons
 
 /**
  * Server-adapter derivation: builds an `AsRaw[RawRpc[Raw], Real]` that turns a real trait instance
@@ -21,14 +21,13 @@ import commons.realCons
 object AsRawDerivation:
 
   inline def impl[Raw, Real: Done.Of](plans: Tuple)(using ExecutionContext): AsRaw[RawRpc[Raw], Real] =
-    (api: Real) => buildRawRpc[Raw, Real, plans.type](api)(using containsOnly.refl)
+    (api: Real) =>
+      given plans.type containsOnly OpPlan = containsOnly.refl
+      buildRawRpc[Raw, Real, plans.type](api)
 
   /** Assembles the dispatching `RawRpc[Raw]`; `Done.Of[Real]` is summoned once and shared across `fire`/`call`/`get`. */
-  inline def buildRawRpc[Raw, Real: {Done.Of as done}, Plans <: Tuple](
-    api: Real,
-  )(using Plans containsOnly OpPlan,
-  )(using ec: ExecutionContext,
-  ): RawRpc[Raw] =
+  inline def buildRawRpc[Raw, Real: {Done.Of as done}, Plans <: Tuple: Of[OpPlan]](api: Real)(using ExecutionContext)
+    : RawRpc[Raw] =
     type Names = Tuple.Map[
       Plans,
       [op] =>> op match

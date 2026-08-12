@@ -5,8 +5,8 @@ import scala.concurrent.{ExecutionContext, Future}
 import mcodec.MCodec
 
 import mrpc.annotation.{multi, rpcName, RpcTag}
-import mrpc.conv.AsRaw
-import mrpc.raw.RawRpcCompanion
+import mrpc.conv.{AsRaw, AsReal}
+import mrpc.raw.{RawRpc, RawRpcCompanion}
 
 /**
  * Shared fixtures every derivation suite builds against. Declares a sample real trait exercising
@@ -110,3 +110,35 @@ object SampleApi:
     val userEncoder: AsRawRpc[User] = summon[AsRawRpc[User]]
     val futureResultEncoder: AsRaw[Future[String], Future[User]] =
       summon[AsRaw[Future[String], Future[User]]]
+
+    // Every `materializeAsRaw`/`materializeAsReal` call independently re-expands the full
+    // RpcNames/OpPlan/AsRawDerivation macro cascade (inline defs are re-expanded at each call site,
+    // not cached per type). Derived ONCE here and reused via import across every derivation suite,
+    // instead of each suite re-deriving the same instances, to avoid paying that expansion N times.
+
+    // Non-recursive sub-RPC conversions the `users`/`SampleApi` get-arity seams summon.
+    given usersRaw: AsRaw[RawRpc[String], UsersRpc] = materializeAsRaw[UsersRpc]
+    given usersReal: AsReal[RawRpc[String], UsersRpc] = materializeAsReal[UsersRpc]
+
+    // Self-referential wiring (lazy val given read back through makeLazy — the FINDINGS Pitfall-1
+    // placement): SelfRpc.child returns SelfRpc, so the nested summon inside materializeAsRaw/Real
+    // must resolve to this already-declared lazy given instead of re-deriving forever.
+    lazy val selfRaw: AsRaw[RawRpc[String], SelfRpc] = AsRaw.makeLazy(materializeAsRaw[SelfRpc])
+    lazy val selfReal: AsReal[RawRpc[String], SelfRpc] = AsReal.makeLazy(materializeAsReal[SelfRpc])
+    given AsRaw[RawRpc[String], SelfRpc] = selfRaw
+    given AsReal[RawRpc[String], SelfRpc] = selfReal
+
+    // Mutually-referential wiring (Ping.toPong -> Pong, Pong.toPing -> Ping), same lazy-given-readback
+    // mechanism: each side's adapter/proxy resolves its peer to the lazy placeholder, not a re-derivation.
+    lazy val pingRaw: AsRaw[RawRpc[String], Ping] = AsRaw.makeLazy(materializeAsRaw[Ping])
+    lazy val pingReal: AsReal[RawRpc[String], Ping] = AsReal.makeLazy(materializeAsReal[Ping])
+    lazy val pongRaw: AsRaw[RawRpc[String], Pong] = AsRaw.makeLazy(materializeAsRaw[Pong])
+    lazy val pongReal: AsReal[RawRpc[String], Pong] = AsReal.makeLazy(materializeAsReal[Pong])
+    given AsRaw[RawRpc[String], Ping] = pingRaw
+    given AsReal[RawRpc[String], Ping] = pingReal
+    given AsRaw[RawRpc[String], Pong] = pongRaw
+    given AsReal[RawRpc[String], Pong] = pongReal
+
+    // The headline server-adapter/client-proxy pair every loopback/dispatch/property suite drives.
+    given sampleApiRaw: AsRaw[RawRpc[String], SampleApi] = materializeAsRaw[SampleApi]
+    given sampleApiReal: AsReal[RawRpc[String], SampleApi] = materializeAsReal[SampleApi]

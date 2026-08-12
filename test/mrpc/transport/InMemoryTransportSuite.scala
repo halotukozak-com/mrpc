@@ -7,6 +7,7 @@ import mrpc.conv.{AsRaw, AsReal}
 import mrpc.derive.SampleApi.*
 import mrpc.raw.RawRpc
 
+
 /**
  * The full real->raw->transport->raw->real round-trip over the sample trait: the bare loopback passes
  * the `RawRpc[String]` directly, whereas here a single concrete [[InMemoryTransport]] sits in the

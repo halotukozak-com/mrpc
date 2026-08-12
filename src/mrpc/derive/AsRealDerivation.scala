@@ -1,12 +1,12 @@
 package mrpc
 package derive
 
+import commons.*
 import made.*
 import mrpc.conv.AsReal
 import mrpc.raw.RawRpc
 
 import scala.concurrent.ExecutionContext
-import commons.realCons
 
 /**
  * Client-proxy derivation: builds an `AsReal[RawRpc[Raw], Real]` that turns a transport-facing
@@ -25,12 +25,12 @@ import commons.realCons
 object AsRealDerivation:
 
   inline def impl[Raw, Real: {Done.Of as done}](plans: Tuple)(using ExecutionContext): AsReal[RawRpc[Raw], Real] =
-    raw => buildAllHandlers[Raw, plans.type](using raw, containsOnly.refl).to[Real](using done)(using ValidHandlers.refl)
+    raw => buildAllHandlers[Raw, plans.type](using raw, containsOnly.refl).materializeTo[Real](using done)(using ValidHandlers.refl)
 
-  transparent inline private def buildAllHandlers[Raw: RawRpc, Plans <: Tuple](
-    using Plans containsOnly OpPlan,
-    ExecutionContext,
-  ): Tuple = inline compiletime.erasedValue[Plans] match
-    case _: EmptyTuple => EmptyTuple
-    case _: (head *: tail) =>
-      realCons(Handler.materialize[Raw, head & OpPlan], buildAllHandlers[Raw, tail & Tuple.Tail[Plans]])
+  // todo
+  transparent inline private def buildAllHandlers[Raw: RawRpc, Plans <: Tuple: Of[OpPlan]](using ExecutionContext)
+    : Tuple =
+    inline compiletime.erasedValue[Plans] match
+      case _: EmptyTuple => EmptyTuple
+      case _: (head *: tail) =>
+        realCons(Handler.materialize[Raw, head & OpPlan], buildAllHandlers[Raw, tail & Tuple.Tail[Plans]])

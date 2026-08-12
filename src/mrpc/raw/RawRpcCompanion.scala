@@ -2,7 +2,7 @@ package mrpc
 package raw
 
 import made.Done
-import made.containsOnly
+import commons.containsOnly
 import mrpc.conv.{AsRaw, AsRawReal, AsReal}
 import mrpc.derive.{Plans, RpcNames}
 

@@ -5,7 +5,6 @@ import made.Done
 import scala.concurrent.duration.Duration
 import scala.concurrent.{Await, ExecutionContext, Future}
 import mcodec.Json
-import mrpc.conv.AsRaw
 import mrpc.derive.SampleApi.*
 import mrpc.raw.{RawInvocation, RawRpc}
 
@@ -35,12 +34,9 @@ class DispatchSafetySuite extends munit.FunSuite:
     def echoBool(b: Boolean): Future[Boolean] = Future.successful(b)
     def findRenamed(id: Int): Future[User] = Future.successful(User(id, "renamed"))
 
-  // The non-recursive sub-RPC adapter the `users` get arm routes to (the recursion seam summons it).
-  private given AsRaw[RawRpc[String], UsersRpc] = SampleApiCodec.materializeAsRaw[UsersRpc]
-
-  // The materialized server adapter under test.
-  private val rawRpc: RawRpc[String] =
-    SampleApiCodec.materializeAsRaw[SampleApi].asRaw(impl)
+  // The materialized server adapter under test (derived once in `SampleApiCodec` and shared; its
+  // internal `users` get-arm summon of the sub-RPC adapter resolves there, not here).
+  private val rawRpc: RawRpc[String] = SampleApiCodec.sampleApiRaw.asRaw(impl)
 
   private def raw[A: mcodec.MCodec](a: A): String = Json.write(a)
   private def await[A](f: Future[A]): A = Await.result(f, Duration.Inf)
