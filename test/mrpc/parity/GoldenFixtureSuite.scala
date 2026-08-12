@@ -5,7 +5,7 @@ import scala.io.Source
 
 import mcodec.MCodec
 
-import mrpc.annotation.{multi, rpcName}
+import mrpc.annotation.{multi, optional, rpcName}
 import mrpc.raw.{RawInvocation, RawRpc}
 import mrpc.raw.RawRpcCompanion
 
@@ -24,9 +24,6 @@ import mrpc.raw.RawRpcCompanion
  * golden data for the in-scope fixtures — primitives AND the object DTO — so no parse-normalize step
  * is used. The captured `args` (`List[List[String]]` of JSON fragments) re-render to the fixture's
  * `args` JSON array verbatim. The additive `metadata` field is ignored (DIVERGENCES.md D5).
- *
- * The two `@optional` fixtures (`optional_configure_*`) are out of scope for v1 (DIVERGENCES.md D7)
- * and are visibly excluded with `.ignore`, NOT silently passing.
  */
 class GoldenFixtureSuite extends munit.FunSuite:
 
@@ -55,6 +52,10 @@ class GoldenFixtureSuite extends munit.FunSuite:
 
     // tagged_emit: rpcName "emit", args [["warn",{"k1":"v1","k2":"v2"}]] — String + object DTO.
     def emit(level: String, fields: Fields): Unit
+
+    // optional_configure_none/some: rpcName "configure", args [[null]] / [[30]] — Option's own leaf
+    // codec already round-trips None <-> null and Some(v) <-> v, so no arity handling is needed here.
+    def configure(@optional x: Option[Int]): Unit
 
   // The concrete Raw = String companion the proxy is materialized against. The leaf codec givens and
   // the ExecutionContext the macro needs are already in this suite's scope (imported above).
@@ -118,9 +119,10 @@ class GoldenFixtureSuite extends munit.FunSuite:
     proxy.emit("warn", Fields("v1", "v2"))
     assertEquals(render(lastEmitted), fixture("tagged_emit"))
 
-  // The @optional fixtures (configure none/some) are OUT OF SCOPE for v1 (DIVERGENCES.md D7): the
-  // @optional/@whenAbsent arity chain is deferred. Marked visibly pending, not silently passing.
-  test("@optional configure fixtures are excluded pending v1 arity support (DIVERGENCES.md D7)".ignore):
-    val _ = fixture("optional_configure_none")
-    val _ = fixture("optional_configure_some")
-    fail("configure (@optional) is out of scope for v1 — see DIVERGENCES.md D7")
+  test("optional_configure_none: configure(None) emits null byte-for-byte"):
+    proxy.configure(None)
+    assertEquals(render(lastEmitted), fixture("optional_configure_none"))
+
+  test("optional_configure_some: configure(Some(30)) emits the bare value byte-for-byte"):
+    proxy.configure(Some(30))
+    assertEquals(render(lastEmitted), fixture("optional_configure_some"))
