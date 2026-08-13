@@ -1,9 +1,9 @@
 package halotukozak.mrpc
 package derive
 
-import commons.*
-import made.*
-import made.annotation.MetaAnnotation
+import halotukozak.commons.*
+import halotukozak.made.*
+import halotukozak.made.annotation.MetaAnnotation
 import halotukozak.mrpc.annotation.*
 
 import scala.compiletime.ops.int.{+, >}

@@ -1,8 +1,8 @@
 package halotukozak.mrpc
 package derive
 
-import commons.*
-import made.*
+import halotukozak.commons.*
+import halotukozak.made.*
 
 import scala.annotation.Annotation
 import scala.quoted.{Expr, Quotes, Type}
@@ -10,7 +10,7 @@ import scala.quoted.{Expr, Quotes, Type}
 /**
  * The metadata-class-param-driven `materialize` macro. Unlike a blind `Done`-walk emitting a fixed flat
  * shape, this is driven by the METADATA CLASS `M`'s primary-constructor params: it reads each param's
- * steering annotation, classifies it, and fills it from the real trait's `made.Done` structure. The
+ * steering annotation, classifies it, and fills it from the real trait's `halotukozak.made.Done` structure. The
  * emitted value is `new M[Real](<filled params>)`.
  *
  * Steering vocabulary honored:
@@ -48,7 +48,7 @@ private[mrpc] object MetadataDerivation:
       type Ops <: Tuple /* of DoneOperation */
       type Names <: Tuple /* of String */
 
-      given Ops containsOnly made.DoneOperation = compiletime.deferred
+      given Ops containsOnly halotukozak.made.DoneOperation = compiletime.deferred
       given Names containsOnly String = compiletime.deferred
 
       def operations: Ops

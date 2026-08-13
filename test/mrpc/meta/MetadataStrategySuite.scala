@@ -1,6 +1,6 @@
 package halotukozak.mrpc.meta
 
-import made.Made
+import halotukozak.made.Made
 import halotukozak.mrpc.derive.SampleApi.*
 
 /**

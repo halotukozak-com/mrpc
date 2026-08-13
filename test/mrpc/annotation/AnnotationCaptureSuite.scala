@@ -1,10 +1,10 @@
 package halotukozak.mrpc.annotation
 
-import made.Done
+import halotukozak.made.Done
 
 import scala.annotation.unused
 
-//import made.{getAnnotation, hasAnnotation, Done}
+//import halotukozak.made.{getAnnotation, hasAnnotation, Done}
 
 /**
  * Proves `Done.derived` captures the mrpc annotation vocabulary on the trait, its operations, AND

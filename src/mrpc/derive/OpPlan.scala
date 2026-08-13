@@ -1,8 +1,8 @@
 package halotukozak.mrpc
 package derive
 
-import commons.{containsOnly, realCons, Of}
-import made.*
+import halotukozak.commons.{containsOnly, realCons, Of}
+import halotukozak.made.*
 
 import scala.concurrent.Future
 import scala.quoted.{Expr, Quotes, Type}

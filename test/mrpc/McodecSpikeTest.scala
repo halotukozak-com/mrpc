@@ -1,6 +1,6 @@
 package halotukozak.mrpc
 
-import mcodec.*
+import halotukozak.mcodec.*
 import org.scalacheck.{Arbitrary, Gen}
 import org.scalacheck.Prop.forAll
 
@@ -18,7 +18,7 @@ import org.scalacheck.Prop.forAll
 object McodecSpikeTest:
   case class User(id: Int, name: String) derives MCodec
 
-  @made.annotation.transparent
+  @halotukozak.made.annotation.transparent
   case class Email(value: String) derives MCodec
 
   given Arbitrary[User] = Arbitrary:

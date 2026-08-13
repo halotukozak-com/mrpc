@@ -3,7 +3,7 @@ package halotukozak.mrpc.derive
 import scala.concurrent.duration.Duration
 import scala.concurrent.{Await, ExecutionContext, Future}
 
-import mcodec.Json
+import halotukozak.mcodec.Json
 
 import halotukozak.mrpc.derive.SampleApi.*
 import halotukozak.mrpc.derive.SampleApi.SampleApiCodec.{pingRaw, pingReal, pongRaw, pongReal, selfRaw, selfReal}

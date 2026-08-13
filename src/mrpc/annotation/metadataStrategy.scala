@@ -1,6 +1,6 @@
 package halotukozak.mrpc.annotation
 
-import made.annotation.MetaAnnotation
+import halotukozak.made.annotation.MetaAnnotation
 
 /**
  * Marks a metadata slot that collects per-RPC-method metadata. Mirrors commons `rpcMethodMetadata`.

@@ -3,7 +3,7 @@ package halotukozak.mrpc.parity
 import scala.concurrent.{ExecutionContext, Future}
 import scala.io.Source
 
-import mcodec.MCodec
+import halotukozak.mcodec.MCodec
 
 import halotukozak.mrpc.annotation.{multi, rpcName}
 import halotukozak.mrpc.raw.{RawInvocation, RawRpc}

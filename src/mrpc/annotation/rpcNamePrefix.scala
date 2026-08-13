@@ -1,7 +1,7 @@
 package halotukozak.mrpc
 package annotation
 
-import made.annotation.MetaAnnotation
+import halotukozak.made.annotation.MetaAnnotation
 
 import scala.quoted.{Expr, FromExpr, Quotes}
 
