@@ -1,10 +1,10 @@
-package mrpc
+package halotukozak.mrpc
 package derive
 
 import commons.{containsOnly, realCons, Of}
 import made.{Done, DoneOperation}
-import mrpc.conv.{AsRaw, AsReal}
-import mrpc.raw.{RawInvocation, RawRpc}
+import halotukozak.mrpc.conv.{AsRaw, AsReal}
+import halotukozak.mrpc.raw.{RawInvocation, RawRpc}
 
 import scala.concurrent.{ExecutionContext, Future}
 

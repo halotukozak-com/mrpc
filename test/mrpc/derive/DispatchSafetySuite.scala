@@ -1,12 +1,12 @@
-package mrpc.derive
+package halotukozak.mrpc.derive
 
 import made.Done
 
 import scala.concurrent.duration.Duration
 import scala.concurrent.{Await, ExecutionContext, Future}
 import mcodec.Json
-import mrpc.derive.SampleApi.*
-import mrpc.raw.{RawInvocation, RawRpc}
+import halotukozak.mrpc.derive.SampleApi.*
+import halotukozak.mrpc.raw.{RawInvocation, RawRpc}
 
 /**
  * Decode-then-invoke dispatch safety: primitive and wrapper args must round-trip through
@@ -18,7 +18,7 @@ class DispatchSafetySuite extends munit.FunSuite:
 
   // The leaf JSON codec givens and a parasitic ExecutionContext must be in scope where the server
   // adapter is materialized (the abstract-Raw summon proof established this placement).
-  import mrpc.codec.JsonRawValue.given
+  import halotukozak.mrpc.codec.JsonRawValue.given
   given ExecutionContext = ExecutionContext.parasitic
 
   // A concrete real implementation the server adapter dispatches against.

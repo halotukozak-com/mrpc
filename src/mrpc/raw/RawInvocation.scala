@@ -1,4 +1,4 @@
-package mrpc.raw
+package halotukozak.mrpc.raw
 
 /**
  * A single raw invocation: resolved rpc name + per-param-list raw arguments + call metadata.

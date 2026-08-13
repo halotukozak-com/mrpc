@@ -1,9 +1,9 @@
-package mrpc
+package halotukozak.mrpc
 package meta
 
 import made.Made
-import mrpc.annotation.{composite, multi, reifyName, rpcMethodMetadata}
-import mrpc.derive.SampleApi.SampleApi
+import halotukozak.mrpc.annotation.{composite, multi, reifyName, rpcMethodMetadata}
+import halotukozak.mrpc.derive.SampleApi.SampleApi
 
 // The @composite fixture (research §"@composite detail"): NameInfo groups two name reads of the SAME
 // real symbol. @composite means "flatten NameInfo's params into the enclosing construction against the

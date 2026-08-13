@@ -1,4 +1,4 @@
-package mrpc.raw
+package halotukozak.mrpc.raw
 
 class RawInvocationSuite extends munit.FunSuite:
 

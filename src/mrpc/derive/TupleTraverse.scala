@@ -1,4 +1,4 @@
-package mrpc
+package halotukozak.mrpc
 package derive
 
 import scala.quoted.*

@@ -1,6 +1,6 @@
-package mrpc.raw
+package halotukozak.mrpc.raw
 
-import mrpc.conv.{AsRaw, AsReal}
+import halotukozak.mrpc.conv.{AsRaw, AsReal}
 
 class RawRpcCompanionSuite extends munit.FunSuite:
 
