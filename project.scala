@@ -1,6 +1,6 @@
 //> using scala 3.8.4
 
-//> using dep io.github.halotukozak::mcodec:0.1.1-SNAPSHOT
+//> using dep com.halotukozak::mcodec:0.1.1
 
 //> using test.dep org.scalameta::munit:1.3.3
 //> using test.dep org.scalameta::munit-scalacheck:1.3.0
@@ -26,7 +26,7 @@
 ////> using options -Xprint-suspension
 
 //> using options -Yprofile-enabled -Yprofile-trace:debug.json
-//> using publish.organization io.github.halotukozak
+//> using publish.organization com.halotukozak
 //> using publish.name mrpc
 //> using publish.computeVersion git:tag
 //> using publish.description "mrpc - AVSystem/commons-style RPC framework for Scala 3, built on Made and mcodec"

@@ -1,6 +1,6 @@
 package halotukozak.mrpc.meta
 
-import made.*
+import halotukozak.made.*
 import halotukozak.mrpc.annotation.{multi, rpcName}
 import halotukozak.mrpc.derive.SampleApi.SampleApi
 

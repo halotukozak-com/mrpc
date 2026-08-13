@@ -2,7 +2,7 @@ package halotukozak.mrpc.derive
 
 import scala.concurrent.{ExecutionContext, Future}
 
-import mcodec.MCodec
+import halotukozak.mcodec.MCodec
 
 import halotukozak.mrpc.conv.{AsRaw, AsReal}
 import halotukozak.mrpc.raw.RawRpcCompanion
