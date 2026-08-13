@@ -1,10 +1,10 @@
 package halotukozak.mrpc.derive
 
-import made.Done
+import halotukozak.made.Done
 
 import scala.concurrent.duration.Duration
 import scala.concurrent.{Await, ExecutionContext, Future}
-import mcodec.Json
+import halotukozak.mcodec.Json
 import halotukozak.mrpc.derive.SampleApi.*
 import halotukozak.mrpc.raw.{RawInvocation, RawRpc}
 
@@ -38,7 +38,7 @@ class DispatchSafetySuite extends munit.FunSuite:
   // internal `users` get-arm summon of the sub-RPC adapter resolves there, not here).
   private val rawRpc: RawRpc[String] = SampleApiCodec.sampleApiRaw.asRaw(impl)
 
-  private def raw[A: mcodec.MCodec](a: A): String = Json.write(a)
+  private def raw[A: halotukozak.mcodec.MCodec](a: A): String = Json.write(a)
   private def await[A](f: Future[A]): A = Await.result(f, Duration.Inf)
 
   test("an Int arg round-trips through decode->invoke"):

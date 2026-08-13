@@ -2,7 +2,7 @@ package halotukozak.mrpc.derive
 
 import scala.concurrent.{ExecutionContext, Future}
 
-import mcodec.MCodec
+import halotukozak.mcodec.MCodec
 
 import halotukozak.mrpc.annotation.{multi, rpcName, RpcTag}
 import halotukozak.mrpc.conv.{AsRaw, AsReal}

@@ -44,7 +44,7 @@ class MetadataCompileErrorSuite extends munit.FunSuite:
       import halotukozak.mrpc.derive.SampleApi.SampleApi
 
       // A made MetaAnnotation that NO SampleApi method carries.
-      final class neverPresent extends made.annotation.MetaAnnotation
+      final class neverPresent extends halotukozak.made.annotation.MetaAnnotation
 
       final case class SingleAnnotMeta[T](
         @reifyName name: String,

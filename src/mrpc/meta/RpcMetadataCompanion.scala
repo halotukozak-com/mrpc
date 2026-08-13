@@ -1,9 +1,9 @@
 package halotukozak.mrpc
 package meta
 
-import made.{Done, Made}
+import halotukozak.made.{Done, Made}
 import halotukozak.mrpc.derive.RpcNames
-import commons.containsOnly
+import halotukozak.commons.containsOnly
 
 /**
  * User-facing metadata entry point, mirroring commons `RpcMetadataCompanion`. A concrete metadata
@@ -22,7 +22,7 @@ import commons.containsOnly
  * }}}
  *
  * The macro reads `M`'s primary-constructor params, classifies each by its steering annotation, and
- * fills it from the real trait's `made.Done` structure — reusing `RpcName.computeAll` for resolved
+ * fills it from the real trait's `halotukozak.made.Done` structure — reusing `RpcName.computeAll` for resolved
  * names so metadata names cannot drift from the engine's.
  */
 trait RpcMetadataCompanion[M[_]]:

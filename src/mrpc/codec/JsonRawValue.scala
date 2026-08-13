@@ -1,13 +1,13 @@
 package halotukozak.mrpc.codec
 
-import mcodec.{Json, MCodec}
+import halotukozak.mcodec.{Json, MCodec}
 import halotukozak.mrpc.conv.{AsRaw, AsReal}
 
 /**
  * Concrete JSON-string instantiation of the leaf codec bridge. The generic engine keeps `Raw`
  * abstract; this object is the test/transport seam where `Raw = String` (JSON). Mirrors commons'
  * codec-based encoding living in a raw-RPC companion's implicits object: a leaf `AsRaw`/`AsReal`
- * pair derived from the value codec, here `mcodec.MCodec` standing in for `GenCodec`.
+ * pair derived from the value codec, here `halotukozak.mcodec.MCodec` standing in for `GenCodec`.
  */
 object JsonRawValue:
   // A leaf value encodes into the raw (JSON String) form via its MCodec.

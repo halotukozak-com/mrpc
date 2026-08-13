@@ -1,6 +1,6 @@
 package halotukozak.mrpc.annotation
 
-import made.annotation.MetaAnnotation
+import halotukozak.made.annotation.MetaAnnotation
 
 /**
  * Steers a metadata-class constructor parameter to be materialized by IMPLICIT SEARCH
@@ -8,7 +8,7 @@ import made.annotation.MetaAnnotation
  * error message when the implicit cannot be found.
  *
  * Read by reflection on the metadata class's constructor params — NOT captured in
- * `made.Done.Metadata`, so this is a plain [[scala.annotation.StaticAnnotation]]. Mirrors commons
+ * `halotukozak.made.Done.Metadata`, so this is a plain [[scala.annotation.StaticAnnotation]]. Mirrors commons
  * `infer`.
  */
 final class infer extends MetaAnnotation

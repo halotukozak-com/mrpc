@@ -1,8 +1,8 @@
 package halotukozak.mrpc
 package raw
 
-import made.Done
-import commons.containsOnly
+import halotukozak.made.Done
+import halotukozak.commons.containsOnly
 import halotukozak.mrpc.conv.{AsRaw, AsRawReal, AsReal}
 import halotukozak.mrpc.derive.{Plans, RpcNames}
 

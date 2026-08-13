@@ -1,6 +1,6 @@
 package halotukozak.mrpc.codec
 
-import mcodec.MCodec
+import halotukozak.mcodec.MCodec
 import halotukozak.mrpc.conv.{AsRaw, AsReal}
 import halotukozak.mrpc.codec.JsonRawValue.given
 

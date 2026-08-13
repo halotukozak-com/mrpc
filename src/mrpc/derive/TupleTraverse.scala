@@ -2,7 +2,7 @@ package halotukozak.mrpc
 package derive
 
 import scala.quoted.*
-import commons.typeInfo
+import halotukozak.typeInfo
 
 /**
  * Type-level tuple traversal used by the matcher to walk `Done.Operations`, an op's `InputElems`,
