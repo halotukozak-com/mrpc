@@ -1,13 +1,13 @@
-package mrpc.derive
+package halotukozak.mrpc.derive
 
 import scala.concurrent.duration.Duration
 import scala.concurrent.{Await, ExecutionContext, Future}
 
-import mcodec.Json
+import halotukozak.mcodec.Json
 
-import mrpc.derive.SampleApi.*
-import mrpc.derive.SampleApi.SampleApiCodec.{pingRaw, pingReal, pongRaw, pongReal, selfRaw, selfReal}
-import mrpc.raw.RawRpc
+import halotukozak.mrpc.derive.SampleApi.*
+import halotukozak.mrpc.derive.SampleApi.SampleApiCodec.{pingRaw, pingReal, pongRaw, pongReal, selfRaw, selfReal}
+import halotukozak.mrpc.raw.RawRpc
 
 /**
  * Wave-0 de-risking proof for the one genuinely new engine piece: lazy sub-RPC recursion. It proves
@@ -30,7 +30,7 @@ import mrpc.raw.RawRpc
 class RecursionSpikeSuite extends munit.FunSuite:
 
   // Leaf JSON codec givens + parasitic EC must be in scope where both directions are materialized.
-  import mrpc.codec.JsonRawValue.given
+  import halotukozak.mrpc.codec.JsonRawValue.given
   given ExecutionContext = ExecutionContext.parasitic
 
   private def await[A](f: Future[A]): A = Await.result(f, Duration.Inf)

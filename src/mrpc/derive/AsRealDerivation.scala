@@ -1,10 +1,10 @@
-package mrpc
+package halotukozak.mrpc
 package derive
 
-import commons.*
-import made.*
-import mrpc.conv.AsReal
-import mrpc.raw.RawRpc
+import halotukozak.commons.*
+import halotukozak.made.*
+import halotukozak.mrpc.conv.AsReal
+import halotukozak.mrpc.raw.RawRpc
 
 import scala.concurrent.ExecutionContext
 
@@ -20,7 +20,7 @@ import scala.concurrent.ExecutionContext
  * of its own.
  *
  * Arity routing and per-handler body live in [[Handler]]; this object's only job is to read every
- * classified [[OpPlan]] off [[Plans]] and assemble the handler tuple `made.Done.materialize` expects.
+ * classified [[OpPlan]] off [[Plans]] and assemble the handler tuple `halotukozak.made.Done.materialize` expects.
  */
 object AsRealDerivation:
 

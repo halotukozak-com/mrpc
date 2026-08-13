@@ -1,4 +1,4 @@
-package mrpc.derive
+package halotukozak.mrpc.derive
 
 /**
  * Compile-time negative tests. Uses munit's `compileErrors`, which compiles a source string and
@@ -18,11 +18,11 @@ class CompileErrorSuite extends munit.FunSuite:
 //    val errors = compileErrors(
 //      """
 //      import scala.concurrent.Future
-//      import mrpc.annotation.rpcName
+//      import halotukozak.mrpc.annotation.rpcName
 //      trait Dup:
 //        @rpcName("dup") def first(): Unit
 //        @rpcName("dup") def second(n: Int): Future[Int]
-//      val _ = mrpc.derive.Matcher.planFor[Dup, "first"]
+//      val _ = halotukozak.mrpc.derive.Matcher.planFor[Dup, "first"]
 //      """,
 //    )
 //    assert(errors.nonEmpty, "expected a compile error for the duplicate rpc name")

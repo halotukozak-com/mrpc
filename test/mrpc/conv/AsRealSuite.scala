@@ -1,4 +1,4 @@
-package mrpc.conv
+package halotukozak.mrpc.conv
 
 import scala.concurrent.{Await, Future}
 import scala.concurrent.ExecutionContext.parasitic

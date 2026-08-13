@@ -1,8 +1,8 @@
-package mrpc
+package halotukozak.mrpc
 package derive
 
-import commons.{containsOnly, realCons, Of}
-import made.*
+import halotukozak.commons.{containsOnly, realCons, Of}
+import halotukozak.made.*
 
 import scala.concurrent.Future
 import scala.quoted.{Expr, Quotes, Type}
@@ -41,7 +41,7 @@ object ParamPlan:
     Expr(TypeRepr.of[T].typeSymbol.isAbstractType)
 
   transparent inline private def encodingOf(ie: InputElem): EncodingTag =
-    inline if ie.hasAnnotation[mrpc.annotation.verbatim] && isRawCarrier[ie.Type]
+    inline if ie.hasAnnotation[halotukozak.mrpc.annotation.verbatim] && isRawCarrier[ie.Type]
     then EncodingTag.Verbatim
     else EncodingTag.Encoded
 

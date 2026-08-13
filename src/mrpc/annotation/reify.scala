@@ -1,6 +1,6 @@
-package mrpc.annotation
+package halotukozak.mrpc.annotation
 
-import made.annotation.MetaAnnotation
+import halotukozak.made.annotation.MetaAnnotation
 
 import scala.quoted.{Expr, FromExpr, Quotes}
 
@@ -12,8 +12,8 @@ import scala.quoted.{Expr, FromExpr, Quotes}
  *   - `useRawName = true`: maps to the RESOLVED name (`RpcName.computeAll`), i.e. honoring `@rpcName`.
  *
  * Read by reflection on the metadata class's constructor params — NOT captured in
- * `made.Done.Metadata`, so this is a plain [[scala.annotation.StaticAnnotation]] (not a
- * `made.annotation.MetaAnnotation`). Mirrors commons `reifyName`.
+ * `halotukozak.made.Done.Metadata`, so this is a plain [[scala.annotation.StaticAnnotation]] (not a
+ * `halotukozak.made.annotation.MetaAnnotation`). Mirrors commons `reifyName`.
  */
 final class reifyName(val useRawName: Boolean) extends MetaAnnotation:
   def this() = this(false)

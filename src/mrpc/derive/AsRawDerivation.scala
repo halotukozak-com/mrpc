@@ -1,10 +1,10 @@
-package mrpc
+package halotukozak.mrpc
 package derive
 
-import commons.{containsOnly, realCons, Of}
-import made.{Done, DoneOperation}
-import mrpc.conv.{AsRaw, AsReal}
-import mrpc.raw.{RawInvocation, RawRpc}
+import halotukozak.commons.{containsOnly, realCons, Of}
+import halotukozak.made.{Done, DoneOperation}
+import halotukozak.mrpc.conv.{AsRaw, AsReal}
+import halotukozak.mrpc.raw.{RawInvocation, RawRpc}
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -12,7 +12,7 @@ import scala.concurrent.{ExecutionContext, Future}
  * Server-adapter derivation: builds an `AsRaw[RawRpc[Raw], Real]` that turns a real trait instance
  * into a transport-facing [[RawRpc]]. The generated `RawRpc[Raw]` dispatches each incoming
  * [[RawInvocation]] by `rpcName`, decodes every argument to its exact declared parameter type via a
- * summoned `AsReal[Raw, paramType]`, calls `made.Done.invoke`, and encodes the result back to `Raw`.
+ * summoned `AsReal[Raw, paramType]`, calls `halotukozak.made.Done.invoke`, and encodes the result back to `Raw`.
  *
  * The `fire`/`call`/`get` match arms are partitioned by arity — only `fire`-arity ops appear in
  * `fire`, and so on. An `rpcName` outside an arity's known set is rejected explicitly (no silent

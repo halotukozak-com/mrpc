@@ -1,4 +1,4 @@
-package mrpc.meta
+package halotukozak.mrpc.meta
 
 /**
  * Compile-time negative tests for the metadata DSL. Uses munit's `compileErrors`, which compiles a
@@ -16,9 +16,9 @@ class MetadataCompileErrorSuite extends munit.FunSuite:
   test("@infer with no available given fails to compile with the @infer clue"):
     val errors = compileErrors(
       """
-      import mrpc.annotation.infer
-      import mrpc.meta.{RpcMetadataCompanion, TypedMetadata}
-      import mrpc.derive.SampleApi.SampleApi
+      import halotukozak.mrpc.annotation.infer
+      import halotukozak.mrpc.meta.{RpcMetadataCompanion, TypedMetadata}
+      import halotukozak.mrpc.derive.SampleApi.SampleApi
 
       final class NoSuchGiven[T]
 
@@ -39,12 +39,12 @@ class MetadataCompileErrorSuite extends munit.FunSuite:
   test("@single @reifyAnnot on a symbol lacking the annotation fails to compile"):
     val errors = compileErrors(
       """
-      import mrpc.annotation.{multi, reifyAnnot, reifyName, rpcMethodMetadata, single}
-      import mrpc.meta.{RpcMetadataCompanion, TypedMetadata}
-      import mrpc.derive.SampleApi.SampleApi
+      import halotukozak.mrpc.annotation.{multi, reifyAnnot, reifyName, rpcMethodMetadata, single}
+      import halotukozak.mrpc.meta.{RpcMetadataCompanion, TypedMetadata}
+      import halotukozak.mrpc.derive.SampleApi.SampleApi
 
       // A made MetaAnnotation that NO SampleApi method carries.
-      final class neverPresent extends made.annotation.MetaAnnotation
+      final class neverPresent extends halotukozak.made.annotation.MetaAnnotation
 
       final case class SingleAnnotMeta[T](
         @reifyName name: String,
@@ -68,9 +68,9 @@ class MetadataCompileErrorSuite extends munit.FunSuite:
   test("@single @rpcMethodMetadata over a many-op trait fails the arity count check"):
     val errors = compileErrors(
       """
-      import mrpc.annotation.{reifyName, rpcMethodMetadata, single}
-      import mrpc.meta.{RpcMetadataCompanion, TypedMetadata}
-      import mrpc.derive.SampleApi.SampleApi
+      import halotukozak.mrpc.annotation.{reifyName, rpcMethodMetadata, single}
+      import halotukozak.mrpc.meta.{RpcMetadataCompanion, TypedMetadata}
+      import halotukozak.mrpc.derive.SampleApi.SampleApi
 
       final case class MethodOnly[T](
         @reifyName name: String,

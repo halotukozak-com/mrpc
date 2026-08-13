@@ -1,9 +1,9 @@
-package mrpc
+package halotukozak.mrpc
 package meta
 
-import made.*
-import mrpc.derive.SampleApi.SampleApi
-import commons.*
+import halotukozak.made.*
+import halotukozak.mrpc.derive.SampleApi.SampleApi
+import halotukozak.commons.*
 
 /**
  * Wave-0 type-preserving tuple-construction spike (Phase 10, Plan 01, Task 3).
@@ -32,13 +32,13 @@ class TupleConstructionSpikeSuite extends munit.FunSuite:
   private val opCount = 9
 
   test("inline mapAs path keeps per-element refinement and arity (no List widening)"):
-    // `mapAs[made.DoneOperation]` drives a plain accessor (`inputElems.size`) under an explicit
+    // `mapAs[halotukozak.made.DoneOperation]` drives a plain accessor (`inputElems.size`) under an explicit
     // F = [_] =>> Int. The result is a precisely-typed `Tuple.Map[ops, [_] =>> Int]` whose arity
     // equals the op count — proving the heterogeneous tuple is preserved, not widened.
     val arities =
       done.operations
-        .mapAs[made.DoneOperation][[o <: made.DoneOperation] =>> Int]([o <: made.DoneOperation] =>
-          (op: o) => op.inputElems.size,
+        .mapAs[halotukozak.made.DoneOperation][[o <: halotukozak.made.DoneOperation] =>> Int](
+          [o <: halotukozak.made.DoneOperation] => (op: o) => op.inputElems.size,
         )
     assertEquals(arities.size, opCount)
 
@@ -46,9 +46,9 @@ class TupleConstructionSpikeSuite extends munit.FunSuite:
     // `done.operations.toList` first) plus destructuring to keep refinement.
     val names: List[Option[String]] =
       done.operations
-        .getAnnotations[mrpc.annotation.rpcName]
+        .getAnnotations[halotukozak.mrpc.annotation.rpcName]
         .toList
-        .map(x => Option(x.asInstanceOf[mrpc.annotation.rpcName | Null]).map(_.name))
+        .map(x => Option(x.asInstanceOf[halotukozak.mrpc.annotation.rpcName | Null]).map(_.name))
     assertEquals(names.size, opCount)
     assert(names.exists(_.contains("findOne")))
 

@@ -1,8 +1,8 @@
-package mrpc.transport
+package halotukozak.mrpc.transport
 
 import scala.concurrent.Future
 
-import mrpc.raw.{RawInvocation, RawRpc}
+import halotukozak.mrpc.raw.{RawInvocation, RawRpc}
 
 /**
  * The one in-memory `RawRpc[String]` instantiation: a thin wrapper over a server-side
@@ -10,7 +10,7 @@ import mrpc.raw.{RawInvocation, RawRpc}
  * explicit transport boundary. Because `Raw = String` (JSON) the invocation is already fully
  * serializable, so the "transport" is in-process — a function call across the [[hop]] step rather than
  * an HTTP/WebSocket stack. No new `Raw` type and no codec are introduced; the leaf encoding stays in
- * `mrpc.codec.JsonRawValue`.
+ * `halotukozak.mrpc.codec.JsonRawValue`.
  *
  * This adds the explicit raw->transport->raw hop the bare loopback lacks, completing a full
  * real->raw->transport->raw->real round-trip when sandwiched between `materializeAsRaw.asRaw` and

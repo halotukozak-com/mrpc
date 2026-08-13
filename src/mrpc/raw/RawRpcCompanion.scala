@@ -1,10 +1,10 @@
-package mrpc
+package halotukozak.mrpc
 package raw
 
-import made.Done
-import commons.containsOnly
-import mrpc.conv.{AsRaw, AsRawReal, AsReal}
-import mrpc.derive.{Plans, RpcNames}
+import halotukozak.made.Done
+import halotukozak.commons.containsOnly
+import halotukozak.mrpc.conv.{AsRaw, AsRawReal, AsReal}
+import halotukozak.mrpc.derive.{Plans, RpcNames}
 
 import scala.concurrent.ExecutionContext
 
@@ -28,13 +28,13 @@ trait RawRpcCompanion[Raw]:
   // The server adapter: a `Real` trait yields a `RawRpc[Raw]`, so its conversion is
   // `AsRaw[RawRpc[Raw], Real]` (distinct from the leaf `AsRawRpc[Real] = AsRaw[Raw, Real]` codec).
   inline def materializeAsRaw[Real: Done.Of](using ExecutionContext): AsRaw[RawRpc[Raw], Real] =
-    mrpc.derive.AsRawDerivation
+    halotukozak.mrpc.derive.AsRawDerivation
       .impl[Raw, Real](Plans.materialize[Real](RpcNames.materialize[Real])(using summon, containsOnly.refl))
 
   // The client proxy: a `RawRpc[Raw]` yields a `Real` trait implementation, so its conversion is
   // `AsReal[RawRpc[Raw], Real]` (distinct from the leaf `AsRealRpc[Real] = AsReal[Raw, Real]` codec).
   inline def materializeAsReal[Real: Done.Of](using ExecutionContext): AsReal[RawRpc[Raw], Real] =
-    mrpc.derive.AsRealDerivation
+    halotukozak.mrpc.derive.AsRealDerivation
       .impl[Raw, Real](Plans.materialize[Real](RpcNames.materialize[Real])(using summon, containsOnly.refl))
 
   // The combined direction is not needed by any consumer yet; it can be assembled from the two

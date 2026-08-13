@@ -1,12 +1,12 @@
-package mrpc.derive
+package halotukozak.mrpc.derive
 
 import scala.concurrent.{ExecutionContext, Future}
 
-import mcodec.MCodec
+import halotukozak.mcodec.MCodec
 
-import mrpc.annotation.{multi, rpcName, RpcTag}
-import mrpc.conv.{AsRaw, AsReal}
-import mrpc.raw.{RawRpc, RawRpcCompanion}
+import halotukozak.mrpc.annotation.{multi, rpcName, RpcTag}
+import halotukozak.mrpc.conv.{AsRaw, AsReal}
+import halotukozak.mrpc.raw.{RawRpc, RawRpcCompanion}
 
 /**
  * Shared fixtures every derivation suite builds against. Declares a sample real trait exercising
@@ -98,7 +98,7 @@ object SampleApi:
   // leaf codec givens and a parasitic ExecutionContext (for the `call` arity's Future composition)
   // are brought into scope exactly where derivation will be invoked.
   object SampleApiCodec extends RawRpcCompanion[String]:
-    import mrpc.codec.JsonRawValue.given
+    import halotukozak.mrpc.codec.JsonRawValue.given
 
     given ExecutionContext = ExecutionContext.parasitic
 

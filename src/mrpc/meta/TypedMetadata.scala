@@ -1,4 +1,4 @@
-package mrpc.meta
+package halotukozak.mrpc.meta
 
 /**
  * The phantom base of every user metadata class, mirroring commons `metadata.scala:319`'s

@@ -1,11 +1,11 @@
-package mrpc.derive
+package halotukozak.mrpc.derive
 
 import scala.concurrent.duration.Duration
 import scala.concurrent.{Await, ExecutionContext, Future}
 
-import mrpc.derive.SampleApi.*
-import mrpc.derive.SampleApi.SampleApiCodec.{pingRaw, pingReal, pongRaw, pongReal, selfRaw, selfReal}
-import mrpc.raw.RawRpc
+import halotukozak.mrpc.derive.SampleApi.*
+import halotukozak.mrpc.derive.SampleApi.SampleApiCodec.{pingRaw, pingReal, pongRaw, pongReal, selfRaw, selfReal}
+import halotukozak.mrpc.raw.RawRpc
 
 /**
  * The production-API analog of `RecursionSpikeSuite`: it round-trips self- and mutually-referential
@@ -24,7 +24,7 @@ import mrpc.raw.RawRpc
 class RecursionSuite extends munit.FunSuite:
 
   // Leaf JSON codec givens + parasitic EC must be in scope where both directions materialize.
-  import mrpc.codec.JsonRawValue.given
+  import halotukozak.mrpc.codec.JsonRawValue.given
   given ExecutionContext = ExecutionContext.parasitic
 
   private def await[A](f: Future[A]): A = Await.result(f, Duration.Inf)
