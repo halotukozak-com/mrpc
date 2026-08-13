@@ -1,8 +1,8 @@
-package mrpc
+package halotukozak.mrpc
 package derive
 
-import mrpc.derive.SampleApi.*
-import mrpc.raw.RawRpc
+import halotukozak.mrpc.derive.SampleApi.*
+import halotukozak.mrpc.raw.RawRpc
 import org.scalacheck.{Arbitrary, Gen}
 import org.scalacheck.Prop.forAll
 
@@ -20,7 +20,7 @@ import scala.concurrent.duration.Duration
 class RoundTripLawProps extends munit.ScalaCheckSuite:
 
   // Leaf JSON codec givens + parasitic EC must be in scope where both directions materialize.
-  import mrpc.codec.JsonRawValue.given
+  import halotukozak.mrpc.codec.JsonRawValue.given
   given ExecutionContext = ExecutionContext.parasitic
 
   // Arbitrary[User] copied from LeafCodecProps: alphaNum names keep the JSON leaf encoding away from

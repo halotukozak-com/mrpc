@@ -1,4 +1,4 @@
-package mrpc
+package halotukozak.mrpc
 package derive
 
 import commons.*
@@ -126,28 +126,28 @@ private[mrpc] object MetadataDerivation:
         report.errorAndAbort("@reifyName: no @reifyName annotation found on the metadata param's type chain")
       case '[t *: ts] =>
         TypeRepr.of[t] match
-          case AnnotatedType(_, annot) if annot.tpe <:< TypeRepr.of[mrpc.annotation.reifyName] =>
-            annot.asExprOf[mrpc.annotation.reifyName] match
+          case AnnotatedType(_, annot) if annot.tpe <:< TypeRepr.of[halotukozak.mrpc.annotation.reifyName] =>
+            annot.asExprOf[halotukozak.mrpc.annotation.reifyName] match
               case Expr(x) => Expr(x.useRawName)
 
     loop[M]
 
   transparent inline private def arity(e: MadeElem): SlotArity =
-    inline if e.hasAnnotation[mrpc.annotation.multi] then SlotArity.Multi
-    else inline if e.hasAnnotation[mrpc.annotation.optional] then SlotArity.Optional
+    inline if e.hasAnnotation[halotukozak.mrpc.annotation.multi] then SlotArity.Multi
+    else inline if e.hasAnnotation[halotukozak.mrpc.annotation.optional] then SlotArity.Optional
     else SlotArity.Single
 
   inline private def fillParam(e: MadeElem)(using Context) =
-    inline if e.hasAnnotation[mrpc.annotation.composite] then composite[e.Type]
-    else inline if e.hasAnnotation[mrpc.annotation.reifyName] then reifyName(e.getUserRawName)
-    else inline if e.hasAnnotation[mrpc.annotation.reifyAnnot] then reifyAnnot[e.Type](arity(e))
-    else inline if e.hasAnnotation[mrpc.annotation.rpcMethodMetadata] then
+    inline if e.hasAnnotation[halotukozak.mrpc.annotation.composite] then composite[e.Type]
+    else inline if e.hasAnnotation[halotukozak.mrpc.annotation.reifyName] then reifyName(e.getUserRawName)
+    else inline if e.hasAnnotation[halotukozak.mrpc.annotation.reifyAnnot] then reifyAnnot[e.Type](arity(e))
+    else inline if e.hasAnnotation[halotukozak.mrpc.annotation.rpcMethodMetadata] then
       inline ctx match
         case ctx: Context.Trait => rpcMethodMetadata[e.Type, e.Label](arity(e))(using ctx)
-    else inline if e.hasAnnotation[mrpc.annotation.rpcParamMetadata] then
+    else inline if e.hasAnnotation[halotukozak.mrpc.annotation.rpcParamMetadata] then
       inline ctx match
         case ctx: Context.Method => rpcParamMetadata[e.Type, e.Label](arity(e))(using ctx)
-    else inline if e.hasAnnotation[mrpc.annotation.infer] then compiletime.summonInline[e.Type]
+    else inline if e.hasAnnotation[halotukozak.mrpc.annotation.infer] then compiletime.summonInline[e.Type]
     else
       compiletime.error(
         "metadata param '" + compiletime.constValue[e.Label] + "' has no recognized steering annotation " +

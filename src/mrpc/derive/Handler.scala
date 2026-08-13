@@ -1,8 +1,8 @@
-package mrpc
+package halotukozak.mrpc
 package derive
 
-import mrpc.conv.{AsRaw, AsReal}
-import mrpc.raw.{RawInvocation, RawRpc}
+import halotukozak.mrpc.conv.{AsRaw, AsReal}
+import halotukozak.mrpc.raw.{RawInvocation, RawRpc}
 
 import scala.annotation.tailrec
 import scala.concurrent.ExecutionContext

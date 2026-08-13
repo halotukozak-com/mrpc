@@ -1,10 +1,10 @@
-package mrpc
+package halotukozak.mrpc
 package derive
 
 import commons.*
 import made.*
-import mrpc.conv.AsReal
-import mrpc.raw.RawRpc
+import halotukozak.mrpc.conv.AsReal
+import halotukozak.mrpc.raw.RawRpc
 
 import scala.concurrent.ExecutionContext
 
@@ -25,7 +25,9 @@ import scala.concurrent.ExecutionContext
 object AsRealDerivation:
 
   inline def impl[Raw, Real: {Done.Of as done}](plans: Tuple)(using ExecutionContext): AsReal[RawRpc[Raw], Real] =
-    raw => buildAllHandlers[Raw, plans.type](using raw, containsOnly.refl).materializeTo[Real](using done)(using ValidHandlers.refl)
+    raw =>
+      buildAllHandlers[Raw, plans.type](using raw, containsOnly.refl)
+        .materializeTo[Real](using done)(using ValidHandlers.refl)
 
   // todo
   transparent inline private def buildAllHandlers[Raw: RawRpc, Plans <: Tuple: Of[OpPlan]](using ExecutionContext)

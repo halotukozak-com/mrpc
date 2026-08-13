@@ -1,12 +1,12 @@
-package mrpc.parity
+package halotukozak.mrpc.parity
 
 import scala.concurrent.duration.Duration
 import scala.concurrent.{Await, ExecutionContext, Future}
 
-import mrpc.conv.{AsRaw, AsReal}
-import mrpc.derive.SampleApi.*
-import mrpc.derive.SampleApi
-import mrpc.raw.RawRpc
+import halotukozak.mrpc.conv.{AsRaw, AsReal}
+import halotukozak.mrpc.derive.SampleApi.*
+import halotukozak.mrpc.derive.SampleApi
+import halotukozak.mrpc.raw.RawRpc
 
 /**
  * A representative subset of the AVSystem/commons RPC test suite, ported as BEHAVIOUR (not source).
@@ -31,7 +31,7 @@ import mrpc.raw.RawRpc
 class CommonsParitySuite extends munit.FunSuite:
 
   // Leaf JSON codec givens + a parasitic ExecutionContext, in scope where both directions materialize.
-  import mrpc.codec.JsonRawValue.given
+  import halotukozak.mrpc.codec.JsonRawValue.given
   given ExecutionContext = ExecutionContext.parasitic
 
   private def await[A](f: Future[A]): A = Await.result(f, Duration.Inf)

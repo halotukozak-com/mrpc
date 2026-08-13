@@ -1,8 +1,8 @@
-package mrpc
+package halotukozak.mrpc
 package meta
 
 import made.*
-import mrpc.derive.SampleApi.SampleApi
+import halotukozak.mrpc.derive.SampleApi.SampleApi
 import commons.*
 
 /**
@@ -46,9 +46,9 @@ class TupleConstructionSpikeSuite extends munit.FunSuite:
     // `done.operations.toList` first) plus destructuring to keep refinement.
     val names: List[Option[String]] =
       done.operations
-        .getAnnotations[mrpc.annotation.rpcName]
+        .getAnnotations[halotukozak.mrpc.annotation.rpcName]
         .toList
-        .map(x => Option(x.asInstanceOf[mrpc.annotation.rpcName | Null]).map(_.name))
+        .map(x => Option(x.asInstanceOf[halotukozak.mrpc.annotation.rpcName | Null]).map(_.name))
     assertEquals(names.size, opCount)
     assert(names.exists(_.contains("findOne")))
 

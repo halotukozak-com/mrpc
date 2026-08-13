@@ -1,10 +1,10 @@
-package mrpc
+package halotukozak.mrpc
 package derive
 
 import commons.*
 import made.*
 import made.annotation.MetaAnnotation
-import mrpc.annotation.*
+import halotukozak.mrpc.annotation.*
 
 import scala.compiletime.ops.int.{+, >}
 import scala.quoted.*
@@ -51,13 +51,13 @@ object RpcNames:
           case _ => loop[ts, Annot]
 
   private def getRpcNameImpl[M <: Tuple: Type](using Quotes): Expr[String | Null] =
-    Expr(loop[M, mrpc.annotation.rpcName].map(_.name).orNull)
+    Expr(loop[M, halotukozak.mrpc.annotation.rpcName].map(_.name).orNull)
 
   private def getOverloadedOnlyImpl[M <: Tuple: Type](using Quotes): Expr[Boolean | Null] =
-    Expr(loop[M, mrpc.annotation.rpcNamePrefix].map(_.overloadedOnly).orNull)
+    Expr(loop[M, halotukozak.mrpc.annotation.rpcNamePrefix].map(_.overloadedOnly).orNull)
 
   private def getPrefixImpl[M <: Tuple: Type](using Quotes): Expr[String | Null] =
-    Expr(loop[M, mrpc.annotation.rpcNamePrefix].map(_.prefix).orNull)
+    Expr(loop[M, halotukozak.mrpc.annotation.rpcNamePrefix].map(_.prefix).orNull)
 
   /**
    */
@@ -89,7 +89,7 @@ object RpcNames:
     inline val overloaded = compiletime.constValue[Overloaded[Names, Values, Base]]
     inline val prefixed = applyPrefix2[Base](op, overloaded)
     // Only overloaded members without their own @rpcName disambiguation get the signature suffix.
-    inline val res = inline if overloaded && !op.hasAnnotation[mrpc.annotation.rpcName] then
+    inline val res = inline if overloaded && !op.hasAnnotation[halotukozak.mrpc.annotation.rpcName] then
       prefixed + op.overloadedSuffix
     else prefixed
     compiletime.requireConst(res)

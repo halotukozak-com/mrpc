@@ -1,12 +1,12 @@
-package mrpc.derive
+package halotukozak.mrpc.derive
 
 import scala.concurrent.duration.Duration
 import scala.concurrent.{Await, ExecutionContext, Future}
 
-import mrpc.derive.SampleApi.*
-import mrpc.derive.SampleApi.SampleApiCodec.{selfRaw, selfReal}
-import mrpc.raw.RawRpc
-import mrpc.transport.InMemoryTransport
+import halotukozak.mrpc.derive.SampleApi.*
+import halotukozak.mrpc.derive.SampleApi.SampleApiCodec.{selfRaw, selfReal}
+import halotukozak.mrpc.raw.RawRpc
+import halotukozak.mrpc.transport.InMemoryTransport
 
 /**
  * The headline real->raw->real loopback over the sample trait: materialize a real `SampleApi` impl
@@ -18,7 +18,7 @@ class LoopbackSuite extends munit.FunSuite:
 
   // The leaf JSON codec givens and a parasitic ExecutionContext must be in scope where both
   // directions are materialized (the abstract-Raw summon proof established this placement).
-  import mrpc.codec.JsonRawValue.given
+  import halotukozak.mrpc.codec.JsonRawValue.given
   given ExecutionContext = ExecutionContext.parasitic
 
   private var pinged: Boolean = false

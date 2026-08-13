@@ -1,7 +1,7 @@
-package mrpc.meta
+package halotukozak.mrpc.meta
 
 import made.Made
-import mrpc.derive.SampleApi.*
+import halotukozak.mrpc.derive.SampleApi.*
 
 /**
  * The migrated v1 `MetadataStrategySuite`, rewritten onto the TypedMetadata DSL. The v1 surface

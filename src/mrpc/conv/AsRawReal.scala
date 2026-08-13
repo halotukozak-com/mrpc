@@ -1,4 +1,4 @@
-package mrpc.conv
+package halotukozak.mrpc.conv
 
 /** Combines [[AsRaw]] and [[AsReal]] into a single bidirectional conversion. */
 trait AsRawReal[Raw, Real] extends AsReal[Raw, Real], AsRaw[Raw, Real]

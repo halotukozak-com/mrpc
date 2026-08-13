@@ -1,14 +1,14 @@
-package mrpc.meta
+package halotukozak.mrpc.meta
 
 import made.Made
-import mrpc.annotation.{multi, reifyAnnot, reifyName, rpcMethodMetadata, rpcParamMetadata}
-import mrpc.derive.SampleApi.{SampleApi, *}
+import halotukozak.mrpc.annotation.{multi, reifyAnnot, reifyName, rpcMethodMetadata, rpcParamMetadata}
+import halotukozak.mrpc.derive.SampleApi.{SampleApi, *}
 
 // Per-param metadata for the migrated v1 suite: source name + the optional @multi annotation a param
 // may carry (SampleApi.increment's `n` is @multi).
 final case class ParamInfo[T](
   @reifyName name: String,
-  @reifyAnnot multiAnnot: Option[mrpc.annotation.multi],
+  @reifyAnnot multiAnnot: Option[halotukozak.mrpc.annotation.multi],
 ) extends TypedMetadata[T]
 
 // Per-method metadata: source label, resolved rpcName, the optional @rpcName instance, and the
@@ -16,7 +16,7 @@ final case class ParamInfo[T](
 final case class MethodInfo[T](
   @reifyName label: String,
   @reifyName(useRawName = true) rpcName: String,
-  @reifyAnnot rpcNameAnnot: Option[mrpc.annotation.rpcName],
+  @reifyAnnot rpcNameAnnot: Option[halotukozak.mrpc.annotation.rpcName],
   @rpcParamMetadata @multi params: List[ParamInfo[?]],
 ) extends TypedMetadata[T]
 
@@ -33,7 +33,7 @@ object ApiInfo extends RpcMetadataCompanion[ApiInfo]
  * rpcNames == the engine's) no longer needs its own check: both this metadata path and the engine
  * source rpcNames from the SAME `RpcNames.namesOf` authority (see `MetadataDerivation`/`Matcher`), so
  * they cannot diverge by construction. Arity classification is asserted at the type level in
- * `mrpc.derive.MatchingSuite` (the DSL itself has no arity slot — there is one classifier).
+ * `halotukozak.mrpc.derive.MatchingSuite` (the DSL itself has no arity slot — there is one classifier).
  */
 class MetadataSuite extends munit.FunSuite:
 

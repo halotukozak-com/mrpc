@@ -1,8 +1,8 @@
-package mrpc.codec
+package halotukozak.mrpc.codec
 
 import mcodec.MCodec
-import mrpc.conv.{AsRaw, AsReal}
-import mrpc.codec.JsonRawValue.given
+import halotukozak.mrpc.conv.{AsRaw, AsReal}
+import halotukozak.mrpc.codec.JsonRawValue.given
 
 /** Shared fixture for the leaf-codec round-trip tests. */
 object LeafCodecFixture:

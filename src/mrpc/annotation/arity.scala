@@ -1,4 +1,4 @@
-package mrpc.annotation
+package halotukozak.mrpc.annotation
 
 import made.annotation.MetaAnnotation
 

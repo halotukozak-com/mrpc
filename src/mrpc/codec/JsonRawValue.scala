@@ -1,7 +1,7 @@
-package mrpc.codec
+package halotukozak.mrpc.codec
 
 import mcodec.{Json, MCodec}
-import mrpc.conv.{AsRaw, AsReal}
+import halotukozak.mrpc.conv.{AsRaw, AsReal}
 
 /**
  * Concrete JSON-string instantiation of the leaf codec bridge. The generic engine keeps `Raw`

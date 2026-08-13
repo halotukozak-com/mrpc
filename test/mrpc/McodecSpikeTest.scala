@@ -1,4 +1,4 @@
-package mrpc
+package halotukozak.mrpc
 
 import mcodec.*
 import org.scalacheck.{Arbitrary, Gen}

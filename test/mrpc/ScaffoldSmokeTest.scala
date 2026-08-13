@@ -1,4 +1,4 @@
-package mrpc
+package halotukozak.mrpc
 
 class ScaffoldSmokeTest extends munit.FunSuite:
   test("scaffold toolchain compiles and runs tests"):
