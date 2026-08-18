@@ -2,7 +2,7 @@
 
 //> using dep com.halotukozak::mcodec:0.1.1
 
-//> using test.dep org.scalameta::munit:1.3.3
+//> using test.dep org.scalameta::munit:1.3.5
 //> using test.dep org.scalameta::munit-scalacheck:1.3.0
 // Toolchain-pinned compiler on the test classpath so compile-time negative tests
 // (compileErrors / typeCheckErrors) run against the same compiler version.
