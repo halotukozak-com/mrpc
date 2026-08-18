@@ -1,8 +1,9 @@
-package mrpc
+package halotukozak.mrpc
 package meta
 
-import made.{containsOnly, Done, Made}
-import mrpc.derive.RpcNames
+import halotukozak.made.{Done, Made}
+import halotukozak.mrpc.derive.RpcNames
+import halotukozak.commons.containsOnly
 
 /**
  * User-facing metadata entry point, mirroring commons `RpcMetadataCompanion`. A concrete metadata
@@ -21,10 +22,10 @@ import mrpc.derive.RpcNames
  * }}}
  *
  * The macro reads `M`'s primary-constructor params, classifies each by its steering annotation, and
- * fills it from the real trait's `made.Done` structure — reusing `RpcName.computeAll` for resolved
+ * fills it from the real trait's `halotukozak.made.Done` structure — reusing `RpcName.computeAll` for resolved
  * names so metadata names cannot drift from the engine's.
  */
 trait RpcMetadataCompanion[M[_]]:
   inline def materialize[Real: {Done.Of as done}](using made: Made.Of[M[Real]]): M[Real] =
-    mrpc.derive.MetadataDerivation
-      .impl[M, Real, done.Operations](done.operations, RpcNames.materialize[Real])(using summon, containsOnly.refl)
+    halotukozak.mrpc.derive.MetadataDerivation
+      .impl[M, Real, done.Operations](done.operations, RpcNames.materialize[Real])(using containsOnly.refl)

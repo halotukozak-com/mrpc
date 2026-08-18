@@ -1,7 +1,8 @@
-package mrpc
+package halotukozak.mrpc
 package derive
 
-import made.*
+import halotukozak.commons.{containsOnly, realCons, Of}
+import halotukozak.made.*
 
 import scala.concurrent.Future
 import scala.quoted.{Expr, Quotes, Type}
@@ -40,7 +41,7 @@ object ParamPlan:
     Expr(TypeRepr.of[T].typeSymbol.isAbstractType)
 
   transparent inline private def encodingOf(ie: InputElem): EncodingTag =
-    inline if ie.hasAnnotation[mrpc.annotation.verbatim] && isRawCarrier[ie.Type]
+    inline if ie.hasAnnotation[halotukozak.mrpc.annotation.verbatim] && isRawCarrier[ie.Type]
     then EncodingTag.Verbatim
     else EncodingTag.Encoded
 
@@ -120,11 +121,9 @@ object Plans:
   transparent inline def materialize[T: {Done.Of as done}](names: Tuple)(using names.type containsOnly String): Tuple =
     buildAll[names.type](done.operations)
 
-  transparent inline private def buildAll[Names <: Tuple](
+  transparent inline private def buildAll[Names <: Tuple: Of[String]](
     operations: Tuple,
-  )(using
-    Names containsOnly String,
-    operations.type containsOnly DoneOperation,
+  )(using operations.type containsOnly DoneOperation,
   ): Tuple = inline compiletime.erasedValue[Names] match
     case _: EmptyTuple => EmptyTuple
     case _: (name *: nextNames) =>

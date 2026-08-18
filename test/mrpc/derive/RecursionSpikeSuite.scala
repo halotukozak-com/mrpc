@@ -1,13 +1,13 @@
-package mrpc.derive
+package halotukozak.mrpc.derive
 
 import scala.concurrent.duration.Duration
 import scala.concurrent.{Await, ExecutionContext, Future}
 
-import mcodec.Json
+import halotukozak.mcodec.Json
 
-import mrpc.conv.{AsRaw, AsReal}
-import mrpc.derive.SampleApi.*
-import mrpc.raw.RawRpc
+import halotukozak.mrpc.derive.SampleApi.*
+import halotukozak.mrpc.derive.SampleApi.SampleApiCodec.{pingRaw, pingReal, pongRaw, pongReal, selfRaw, selfReal}
+import halotukozak.mrpc.raw.RawRpc
 
 /**
  * Wave-0 de-risking proof for the one genuinely new engine piece: lazy sub-RPC recursion. It proves
@@ -20,7 +20,8 @@ import mrpc.raw.RawRpc
  * `lazy val given` that the `makeLazy` thunk reads BACK (Pitfall 1) — the eager `get`-seam summon
  * resolves to the already-declared lazy given instead of re-entering `materialize*[Sub]`, so macro
  * expansion reaches a fixed point. The by-name thunk forces the lazy val only at the first runtime
- * `get`, not during expansion.
+ * `get`, not during expansion. That wiring (`selfRaw`/`selfReal`/`pingRaw`/`pingReal`/`pongRaw`/
+ * `pongReal`) is derived once in `SampleApiCodec` and imported here, rather than re-derived per suite.
  *
  * It also resolves the VAL-01 empirical question: whether mcodec `Json.write` output matches the
  * committed golden fixtures byte-for-byte for primitives AND objects. The verdict is recorded in
@@ -29,36 +30,10 @@ import mrpc.raw.RawRpc
 class RecursionSpikeSuite extends munit.FunSuite:
 
   // Leaf JSON codec givens + parasitic EC must be in scope where both directions are materialized.
-  import mrpc.codec.JsonRawValue.given
+  import halotukozak.mrpc.codec.JsonRawValue.given
   given ExecutionContext = ExecutionContext.parasitic
 
   private def await[A](f: Future[A]): A = Await.result(f, Duration.Inf)
-
-  // --- Self-referential wiring (mechanism A) -------------------------------------------------------
-  // The recursive adapter is held in a `lazy val given` the seam summons back; makeLazy defers forcing
-  // it past macro expansion, so the SelfRpc -> SelfRpc cycle terminates at expansion time.
-  private lazy val selfRaw: AsRaw[RawRpc[String], SelfRpc] =
-    AsRaw.makeLazy(SampleApiCodec.materializeAsRaw[SelfRpc])
-  private lazy val selfReal: AsReal[RawRpc[String], SelfRpc] =
-    AsReal.makeLazy(SampleApiCodec.materializeAsReal[SelfRpc])
-  private given AsRaw[RawRpc[String], SelfRpc] = selfRaw
-  private given AsReal[RawRpc[String], SelfRpc] = selfReal
-
-  // --- Mutually-referential wiring (mechanism A) ---------------------------------------------------
-  // Ping's adapter needs Pong's and vice versa; each is a lazy given read back through makeLazy so the
-  // Ping<->Pong cycle resolves the peer to the lazy placeholder rather than re-deriving it.
-  private lazy val pingRaw: AsRaw[RawRpc[String], Ping] =
-    AsRaw.makeLazy(SampleApiCodec.materializeAsRaw[Ping])
-  private lazy val pingReal: AsReal[RawRpc[String], Ping] =
-    AsReal.makeLazy(SampleApiCodec.materializeAsReal[Ping])
-  private lazy val pongRaw: AsRaw[RawRpc[String], Pong] =
-    AsRaw.makeLazy(SampleApiCodec.materializeAsRaw[Pong])
-  private lazy val pongReal: AsReal[RawRpc[String], Pong] =
-    AsReal.makeLazy(SampleApiCodec.materializeAsReal[Pong])
-  private given AsRaw[RawRpc[String], Ping] = pingRaw
-  private given AsReal[RawRpc[String], Ping] = pingReal
-  private given AsRaw[RawRpc[String], Pong] = pongRaw
-  private given AsReal[RawRpc[String], Pong] = pongReal
 
   test("self-referential getter round-trips one nesting level"):
     val raw: RawRpc[String] = selfRaw.asRaw(selfImpl)

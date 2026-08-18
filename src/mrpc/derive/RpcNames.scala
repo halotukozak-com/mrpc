@@ -1,14 +1,15 @@
-package mrpc
+package halotukozak.mrpc
 package derive
 
-import made.*
-import made.annotation.MetaAnnotation
+import halotukozak.commons.*
+import halotukozak.made.*
+import halotukozak.made.annotation.MetaAnnotation
+import halotukozak.mrpc.annotation.*
 
 import scala.compiletime.ops.int.{+, >}
 import scala.quoted.*
 import scala.Tuple.Tail
 import scala.annotation.tailrec
-import mrpc.annotation.*
 
 object RpcNames:
   transparent inline private def buildBases(
@@ -50,24 +51,22 @@ object RpcNames:
           case _ => loop[ts, Annot]
 
   private def getRpcNameImpl[M <: Tuple: Type](using Quotes): Expr[String | Null] =
-    Expr(loop[M, mrpc.annotation.rpcName].map(_.name).orNull)
+    Expr(loop[M, halotukozak.mrpc.annotation.rpcName].map(_.name).orNull)
 
   private def getOverloadedOnlyImpl[M <: Tuple: Type](using Quotes): Expr[Boolean | Null] =
-    Expr(loop[M, mrpc.annotation.rpcNamePrefix].map(_.overloadedOnly).orNull)
+    Expr(loop[M, halotukozak.mrpc.annotation.rpcNamePrefix].map(_.overloadedOnly).orNull)
 
   private def getPrefixImpl[M <: Tuple: Type](using Quotes): Expr[String | Null] =
-    Expr(loop[M, mrpc.annotation.rpcNamePrefix].map(_.prefix).orNull)
+    Expr(loop[M, halotukozak.mrpc.annotation.rpcNamePrefix].map(_.prefix).orNull)
 
   /**
    */
-  transparent inline private def buildResolveds[Names <: Tuple, Values <: Tuple](
+  transparent inline private def buildResolveds[Names <: Tuple: Of[String], Values <: Tuple: Of[Int]](
     bases: Tuple,
     operations: Tuple,
   )(using
     bases.type containsOnly String,
     operations.type containsOnly DoneOperation,
-    Names containsOnly String,
-    Values containsOnly Int,
   ): Tuple =
     inline operations match // for some reason it cannot match on (operations, bases)
       case _: EmptyTuple =>
@@ -90,7 +89,7 @@ object RpcNames:
     inline val overloaded = compiletime.constValue[Overloaded[Names, Values, Base]]
     inline val prefixed = applyPrefix2[Base](op, overloaded)
     // Only overloaded members without their own @rpcName disambiguation get the signature suffix.
-    inline val res = inline if overloaded && !op.hasAnnotation[mrpc.annotation.rpcName] then
+    inline val res = inline if overloaded && !op.hasAnnotation[halotukozak.mrpc.annotation.rpcName] then
       prefixed + op.overloadedSuffix
     else prefixed
     compiletime.requireConst(res)
@@ -127,7 +126,7 @@ object RpcNames:
     ](
       bases,
       done.operations,
-    )(using summon, summon, containsOnly.refl, containsOnly.refl),
+    )(using containsOnly.refl, containsOnly.refl),
   )
 
   inline private def checkDuplicates(result: Tuple): result.type =

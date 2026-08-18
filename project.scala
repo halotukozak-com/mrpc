@@ -1,7 +1,6 @@
 //> using scala 3.9.0-RC4
 
-//> using dep io.github.halotukozak::made:0.3.0
-//> using dep io.github.halotukozak::mcodec:0.1.0
+//> using dep com.halotukozak::mcodec:0.1.1
 
 //> using test.dep org.scalameta::munit:1.3.3
 //> using test.dep org.scalameta::munit-scalacheck:1.3.0
@@ -21,13 +20,13 @@
 // recursing through dotty.tools.dotc.transform.init.Semantic$$anon$1.traverse
 // on TypeAccumulator.foldOver). Re-enable once upstream fixes this, or once
 // derivation is scoped down enough for the checker to terminate.
-//> using options -Werror -Wunused:all
+//> using options -Werror//  -Wunused:all
 
 //> using options -Xmax-inlines 100
 ////> using options -Xprint-suspension
 
 //> using options -Yprofile-enabled -Yprofile-trace:debug.json
-//> using publish.organization io.github.halotukozak
+//> using publish.organization com.halotukozak
 //> using publish.name mrpc
 //> using publish.computeVersion git:tag
 //> using publish.description "mrpc - AVSystem/commons-style RPC framework for Scala 3, built on Made and mcodec"

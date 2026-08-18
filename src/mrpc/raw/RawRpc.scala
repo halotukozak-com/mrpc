@@ -1,4 +1,4 @@
-package mrpc.raw
+package halotukozak.mrpc.raw
 
 import scala.concurrent.Future
 

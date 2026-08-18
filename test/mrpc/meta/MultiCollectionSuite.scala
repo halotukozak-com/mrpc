@@ -1,7 +1,7 @@
-package mrpc.meta
+package halotukozak.mrpc.meta
 
-import mrpc.annotation.{multi, reifyName, rpcMethodMetadata, rpcParamMetadata}
-import mrpc.derive.SampleApi.SampleApi
+import halotukozak.mrpc.annotation.{multi, reifyName, rpcMethodMetadata, rpcParamMetadata}
+import halotukozak.mrpc.derive.SampleApi.SampleApi
 
 // Per-param metadata: just the source name.
 final case class ParamMeta[T](

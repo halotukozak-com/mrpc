@@ -1,13 +1,13 @@
-package mrpc.parity
+package halotukozak.mrpc.parity
 
 import scala.concurrent.{ExecutionContext, Future}
 import scala.io.Source
 
-import mcodec.MCodec
+import halotukozak.mcodec.MCodec
 
-import mrpc.annotation.{multi, optional, rpcName}
-import mrpc.raw.{RawInvocation, RawRpc}
-import mrpc.raw.RawRpcCompanion
+import halotukozak.mrpc.annotation.{multi, optional, rpcName}
+import halotukozak.mrpc.raw.{RawInvocation, RawRpc}
+import halotukozak.mrpc.raw.RawRpcCompanion
 
 /**
  * VAL-01 golden-fixture parity: prove that the client proxy mrpc derives emits exactly the
@@ -27,7 +27,7 @@ import mrpc.raw.RawRpcCompanion
  */
 class GoldenFixtureSuite extends munit.FunSuite:
 
-  import mrpc.codec.JsonRawValue.given
+  import halotukozak.mrpc.codec.JsonRawValue.given
   given ExecutionContext = ExecutionContext.parasitic
 
   // The object payload `emit` carries. Two String fields named `k1`/`k2` so mcodec emits

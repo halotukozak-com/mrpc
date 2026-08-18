@@ -1,13 +1,12 @@
-package mrpc.derive
+package halotukozak.mrpc.derive
 
-import made.Done
+import halotukozak.made.Done
 
 import scala.concurrent.duration.Duration
 import scala.concurrent.{Await, ExecutionContext, Future}
-import mcodec.Json
-import mrpc.conv.AsRaw
-import mrpc.derive.SampleApi.*
-import mrpc.raw.{RawInvocation, RawRpc}
+import halotukozak.mcodec.Json
+import halotukozak.mrpc.derive.SampleApi.*
+import halotukozak.mrpc.raw.{RawInvocation, RawRpc}
 
 /**
  * Decode-then-invoke dispatch safety: primitive and wrapper args must round-trip through
@@ -19,7 +18,7 @@ class DispatchSafetySuite extends munit.FunSuite:
 
   // The leaf JSON codec givens and a parasitic ExecutionContext must be in scope where the server
   // adapter is materialized (the abstract-Raw summon proof established this placement).
-  import mrpc.codec.JsonRawValue.given
+  import halotukozak.mrpc.codec.JsonRawValue.given
   given ExecutionContext = ExecutionContext.parasitic
 
   // A concrete real implementation the server adapter dispatches against.
@@ -35,14 +34,11 @@ class DispatchSafetySuite extends munit.FunSuite:
     def echoBool(b: Boolean): Future[Boolean] = Future.successful(b)
     def findRenamed(id: Int): Future[User] = Future.successful(User(id, "renamed"))
 
-  // The non-recursive sub-RPC adapter the `users` get arm routes to (the recursion seam summons it).
-  private given AsRaw[RawRpc[String], UsersRpc] = SampleApiCodec.materializeAsRaw[UsersRpc]
+  // The materialized server adapter under test (derived once in `SampleApiCodec` and shared; its
+  // internal `users` get-arm summon of the sub-RPC adapter resolves there, not here).
+  private val rawRpc: RawRpc[String] = SampleApiCodec.sampleApiRaw.asRaw(impl)
 
-  // The materialized server adapter under test.
-  private val rawRpc: RawRpc[String] =
-    SampleApiCodec.materializeAsRaw[SampleApi].asRaw(impl)
-
-  private def raw[A: mcodec.MCodec](a: A): String = Json.write(a)
+  private def raw[A: halotukozak.mcodec.MCodec](a: A): String = Json.write(a)
   private def await[A](f: Future[A]): A = Await.result(f, Duration.Inf)
 
   test("an Int arg round-trips through decode->invoke"):
