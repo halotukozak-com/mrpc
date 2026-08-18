@@ -2,8 +2,7 @@ package halotukozak.mrpc.derive
 
 import halotukozak.made.Done
 
-import scala.concurrent.duration.Duration
-import scala.concurrent.{Await, ExecutionContext, Future}
+import scala.concurrent.{ExecutionContext, Future}
 import halotukozak.mcodec.Json
 import halotukozak.mrpc.derive.SampleApi.*
 import halotukozak.mrpc.raw.{RawInvocation, RawRpc}
@@ -39,7 +38,7 @@ class DispatchSafetySuite extends munit.FunSuite:
   private val rawRpc: RawRpc[String] = SampleApiCodec.sampleApiRaw.asRaw(impl)
 
   private def raw[A: halotukozak.mcodec.MCodec](a: A): String = Json.write(a)
-  private def await[A](f: Future[A]): A = Await.result(f, Duration.Inf)
+  private def await[A](f: Future[A]): A = f.value.get.get
 
   test("an Int arg round-trips through decode->invoke"):
     val result = await(rawRpc.call(RawInvocation("increment", List(List(raw(41))))))

@@ -1,8 +1,7 @@
 package halotukozak.mrpc.conv
 
-import scala.concurrent.{Await, Future}
+import scala.concurrent.Future
 import scala.concurrent.ExecutionContext.parasitic
-import scala.concurrent.duration.DurationInt
 import scala.util.{Success, Try}
 
 class AsRealSuite extends munit.FunSuite:
@@ -18,5 +17,5 @@ class AsRealSuite extends munit.FunSuite:
     // Distinct Raw/Real so forFuture (not identity) is selected and the EC is exercised.
     given AsReal[String, Int] = (s: String) => s.toInt
     val instance = summon[AsReal[Future[String], Future[Int]]]
-    val result = Await.result(instance.asReal(Future.successful("2")), 1.second)
+    val result = instance.asReal(Future.successful("2")).value.get.get
     assertEquals(result, 2)

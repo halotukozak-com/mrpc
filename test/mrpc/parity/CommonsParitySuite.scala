@@ -1,7 +1,6 @@
 package halotukozak.mrpc.parity
 
-import scala.concurrent.duration.Duration
-import scala.concurrent.{Await, ExecutionContext, Future}
+import scala.concurrent.{ExecutionContext, Future}
 
 import halotukozak.mrpc.conv.{AsRaw, AsReal}
 import halotukozak.mrpc.derive.SampleApi.*
@@ -34,7 +33,7 @@ class CommonsParitySuite extends munit.FunSuite:
   import halotukozak.mrpc.codec.JsonRawValue.given
   given ExecutionContext = ExecutionContext.parasitic
 
-  private def await[A](f: Future[A]): A = Await.result(f, Duration.Inf)
+  private def await[A](f: Future[A]): A = f.value.get.get
 
   // --- The real SampleApi impl driven through the loopback (commons RPCTest.rpcImpl analog) --------
   private var pinged: Boolean = false
