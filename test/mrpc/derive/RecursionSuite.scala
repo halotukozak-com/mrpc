@@ -1,7 +1,6 @@
 package halotukozak.mrpc.derive
 
-import scala.concurrent.duration.Duration
-import scala.concurrent.{Await, ExecutionContext, Future}
+import scala.concurrent.{ExecutionContext, Future}
 
 import halotukozak.mrpc.derive.SampleApi.*
 import halotukozak.mrpc.derive.SampleApi.SampleApiCodec.{pingRaw, pingReal, pongRaw, pongReal, selfRaw, selfReal}
@@ -27,7 +26,7 @@ class RecursionSuite extends munit.FunSuite:
   import halotukozak.mrpc.codec.JsonRawValue.given
   given ExecutionContext = ExecutionContext.parasitic
 
-  private def await[A](f: Future[A]): A = Await.result(f, Duration.Inf)
+  private def await[A](f: Future[A]): A = f.value.get.get
 
   test("a self-referential getter round-trips real->raw->real one nesting level"):
     val raw: RawRpc[String] = selfRaw.asRaw(selfImpl)

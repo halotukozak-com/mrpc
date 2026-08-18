@@ -1,3 +1,5 @@
+//> using target.platform jvm
+
 package halotukozak.mrpc.parity
 
 import scala.concurrent.{ExecutionContext, Future}

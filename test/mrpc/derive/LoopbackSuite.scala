@@ -1,7 +1,6 @@
 package halotukozak.mrpc.derive
 
-import scala.concurrent.duration.Duration
-import scala.concurrent.{Await, ExecutionContext, Future}
+import scala.concurrent.{ExecutionContext, Future}
 
 import halotukozak.mrpc.derive.SampleApi.*
 import halotukozak.mrpc.derive.SampleApi.SampleApiCodec.{selfRaw, selfReal}
@@ -43,7 +42,7 @@ class LoopbackSuite extends munit.FunSuite:
   private val rawRpc: RawRpc[String] = SampleApiCodec.sampleApiRaw.asRaw(impl)
   private val proxy: SampleApi = SampleApiCodec.sampleApiReal.asReal(rawRpc)
 
-  private def await[A](f: Future[A]): A = Await.result(f, Duration.Inf)
+  private def await[A](f: Future[A]): A = f.value.get.get
 
   test("a call op round-trips real->raw->real and returns the right value"):
     assertEquals(await(proxy.increment(41)), 42)

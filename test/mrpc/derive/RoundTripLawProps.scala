@@ -6,8 +6,7 @@ import halotukozak.mrpc.raw.RawRpc
 import org.scalacheck.{Arbitrary, Gen}
 import org.scalacheck.Prop.forAll
 
-import scala.concurrent.{Await, ExecutionContext, Future}
-import scala.concurrent.duration.Duration
+import scala.concurrent.{ExecutionContext, Future}
 
 /**
  * The round-trip LAW over the full materialized stack: where `LoopbackSuite` pins specific values, this
@@ -49,7 +48,7 @@ class RoundTripLawProps extends munit.ScalaCheckSuite:
   private val rawRpc: RawRpc[String] = SampleApiCodec.sampleApiRaw.asRaw(impl)
   private val proxy: SampleApi = SampleApiCodec.sampleApiReal.asReal(rawRpc)
 
-  private def await[A](f: Future[A]): A = Await.result(f, Duration.Inf)
+  private def await[A](f: Future[A]): A = f.value.get.get
 
   property("a call op round-trips: proxy.increment(n) == n + 1"):
     forAll: (n: Int) =>
