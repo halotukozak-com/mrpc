@@ -102,7 +102,7 @@ divergence rather than pretend the two models are identical.
   model to collect from.
 - **commons:** a full arity/default chain (optional params, absent-value defaults,
   multi-value collection extraction across raw slots).
-- **Why:** the deeper mechanism needs the generic raw-method framework (D8);
+- **Why:** the deeper mechanism needs the generic raw-method framework (D9);
   what a single already-collection-shaped param needs is just its own codec.
 - **Parity treatment:** `@whenAbsent` and multi-slot extraction not ported.
 
