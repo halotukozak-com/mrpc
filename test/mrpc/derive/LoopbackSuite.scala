@@ -34,6 +34,7 @@ class LoopbackSuite extends munit.FunSuite:
     def combine(a: Int)(b: String, c: Long): Future[String] = Future.successful(s"$a-$b-$c")
     def echoBool(b: Boolean): Future[Boolean] = Future.successful(b)
     def findRenamed(id: Int): Future[User] = Future.successful(User(id, "renamed"))
+    def configure(timeout: Option[Int]): Unit = ()
 
   // The non-recursive sub-RPC conversion (get/recursion seams) and the self-referential wiring
   // (`selfRaw`/`selfReal`, imported above) are derived once in `SampleApiCodec` and shared here.

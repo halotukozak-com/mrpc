@@ -4,7 +4,7 @@ import scala.concurrent.{ExecutionContext, Future}
 
 import halotukozak.mcodec.MCodec
 
-import halotukozak.mrpc.annotation.{multi, rpcName, RpcTag}
+import halotukozak.mrpc.annotation.{multi, optional, rpcName, RpcTag}
 import halotukozak.mrpc.conv.{AsRaw, AsReal}
 import halotukozak.mrpc.raw.{RawRpc, RawRpcCompanion}
 
@@ -93,6 +93,11 @@ object SampleApi:
 
     // an explicitly renamed method, a positive target for name resolution.
     @rpcName("findOne") def findRenamed(id: Int): Future[User]
+
+    // fire op with an Option-typed param (DIVERGENCES.md D7): None/Some round-trip through the
+    // ordinary leaf codec (mcodec's Option codec writes null/the value) with no arity handling in
+    // the dispatch path — @optional here is the same additive, matcher-ignored marker as @multi above.
+    def configure(@optional timeout: Option[Int]): Unit
 
   // The concrete Raw = String companion the suites materialize against once the engine exists. The
   // leaf codec givens and a parasitic ExecutionContext (for the `call` arity's Future composition)

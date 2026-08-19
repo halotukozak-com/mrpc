@@ -44,10 +44,10 @@ class CompositeMetadataSuite extends munit.FunSuite:
     assertEquals(ping.nameInfo.rpcName, "ping")
 
   test("a 2-level tree: trait -> one MethodMetaCmp per op -> a filled nested NameInfo"):
-    assertEquals(md.methods.size, 9)
+    assertEquals(md.methods.size, 10)
     assertEquals(
       md.methods.map(_.nameInfo.name).toSet,
-      Set("ping", "increment", "find", "users", "lookup", "combine", "echoBool", "findRenamed"),
+      Set("ping", "increment", "find", "users", "lookup", "combine", "echoBool", "findRenamed", "configure"),
     )
     // every method's composite is materialized (no null/empty nested value)
     assert(md.methods.forall(_.nameInfo.rpcName.nonEmpty))

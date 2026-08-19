@@ -24,15 +24,15 @@ object TraitMeta extends RpcMetadataCompanion[TraitMeta]
 // @rpcMethodMetadata/@rpcParamMetadata with @multi, and the no-fork invariant.
 class MultiCollectionSuite extends munit.FunSuite:
 
-  test("@rpcMethodMetadata @multi: one entry per RPC method (9 ops)"):
+  test("@rpcMethodMetadata @multi: one entry per RPC method (10 ops)"):
     val md = TraitMeta.materialize[SampleApi]
-    assertEquals(md.methods.size, 9)
+    assertEquals(md.methods.size, 10)
 
   test("method names match the resolved rpcNames (source label here)"):
     val md = TraitMeta.materialize[SampleApi]
     assertEquals(
       md.methods.map(_.name).toSet,
-      Set("ping", "increment", "find", "users", "lookup", "combine", "echoBool", "findRenamed"),
+      Set("ping", "increment", "find", "users", "lookup", "combine", "echoBool", "findRenamed", "configure"),
     )
 
   test("@rpcParamMetadata @multi: params in declaration order for combine"):
@@ -49,5 +49,5 @@ class MultiCollectionSuite extends munit.FunSuite:
     // asserted in ApiMeta's @reifyName(useRawName) path, MetadataSuite).
     assertEquals(
       md.methods.map(_.name).toSet,
-      Set("ping", "increment", "find", "users", "lookup", "combine", "echoBool", "findRenamed"),
+      Set("ping", "increment", "find", "users", "lookup", "combine", "echoBool", "findRenamed", "configure"),
     )

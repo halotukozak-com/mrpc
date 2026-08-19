@@ -27,9 +27,9 @@ import halotukozak.commons.*
 class TupleConstructionSpikeSuite extends munit.FunSuite:
 
   private val done = summon[Done.Of[SampleApi]]
-  // SampleApi declares 9 ops (ping, increment, find, users, lookup, lookup, combine, echoBool,
-  // findRenamed) — the arity every type-preserving transform below must keep.
-  private val opCount = 9
+  // SampleApi declares 10 ops (ping, increment, find, users, lookup, lookup, combine, echoBool,
+  // findRenamed, configure) — the arity every type-preserving transform below must keep.
+  private val opCount = 10
 
   test("inline mapAs path keeps per-element refinement and arity (no List widening)"):
     // `mapAs[halotukozak.made.DoneOperation]` drives a plain accessor (`inputElems.size`) under an explicit

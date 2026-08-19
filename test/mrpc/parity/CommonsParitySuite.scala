@@ -22,7 +22,10 @@ import halotukozak.mrpc.raw.RawRpc
  * SKIPPED here, with the deliberate-divergence rationale (see DIVERGENCES.md):
  *   - The exact overload-suffix strings (`one_1`/`two_2`): mrpc uses a reorder-stable signature-hash
  *     suffix, NOT commons' positional `_1`/`_2` (D4). We assert distinct routing, not the strings.
- *   - `@optional`/`@whenAbsent`/`@multi`-collection extraction (D7): arity/default chain is v2.
+ *   - `@whenAbsent` (a raw-side default substituted when a raw slot is truly absent) and commons' true
+ *     `@multi` semantics of collecting several separate raw slots into one collection (D7): both need
+ *     the generic raw-method framework (D8). An already-`Option`/`List`-shaped real param round-trips
+ *     through its own leaf codec instead — see `configure` below and `GoldenFixtureSuite`.
  *   - `@composite`, generic methods (`generallyDoStuff[T]`), varargs, by-name, interceptors, and the
  *     generic user-declared `RawRpc` machinery of `NewRawRpc` (D8): mrpc's fixed three-method RawRpc
  *     deliberately does not implement these; SKIP and document rather than port.
@@ -37,6 +40,7 @@ class CommonsParitySuite extends munit.FunSuite:
 
   // --- The real SampleApi impl driven through the loopback (commons RPCTest.rpcImpl analog) --------
   private var pinged: Boolean = false
+  private var lastConfigured: Option[Int] = None
   private val impl: SampleApi = new SampleApi:
     def ping(): Unit = pinged = true
     def increment(n: Int): Future[Int] = Future.successful(n + 1)
@@ -48,6 +52,7 @@ class CommonsParitySuite extends munit.FunSuite:
     def combine(a: Int)(b: String, c: Long): Future[String] = Future.successful(s"$a-$b-$c")
     def echoBool(b: Boolean): Future[Boolean] = Future.successful(b)
     def findRenamed(id: Int): Future[User] = Future.successful(User(id, "renamed"))
+    def configure(timeout: Option[Int]): Unit = lastConfigured = timeout
 
   // The non-recursive sub-RPC conversions the get seam summons (commons binds these implicitly too).
   private given AsRaw[RawRpc[String], UsersRpc] = SampleApiCodec.materializeAsRaw[UsersRpc]
@@ -123,3 +128,14 @@ class CommonsParitySuite extends munit.FunSuite:
     assertEquals(byId, User(7, "by-id"))
     assertEquals(byName, User(-1, "alice"))
     assertNotEquals(byId, byName)
+
+  // --- 4. Option-typed param round-trips both directions (D7: no arity handling needed) ------------
+
+  test("configure(None) decodes back to None across the full fire loopback"):
+    lastConfigured = Some(-1) // sentinel so a no-op fire can't be mistaken for a correct decode
+    proxy.configure(None)
+    assertEquals(lastConfigured, None)
+
+  test("configure(Some(x)) decodes back to Some(x) across the full fire loopback"):
+    proxy.configure(Some(30))
+    assertEquals(lastConfigured, Some(30))

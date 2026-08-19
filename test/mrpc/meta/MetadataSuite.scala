@@ -43,7 +43,7 @@ class MetadataSuite extends munit.FunSuite:
   test("methods lists every op of the trait"):
     assertEquals(
       md.methods.map(_.label).toSet,
-      Set("ping", "increment", "find", "users", "lookup", "combine", "echoBool", "findRenamed"),
+      Set("ping", "increment", "find", "users", "lookup", "combine", "echoBool", "findRenamed", "configure"),
     )
 
   test("params are listed in declaration order, flattened across param lists"):

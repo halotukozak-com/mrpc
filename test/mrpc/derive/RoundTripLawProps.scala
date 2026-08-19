@@ -42,6 +42,7 @@ class RoundTripLawProps extends munit.ScalaCheckSuite:
     def combine(a: Int)(b: String, c: Long): Future[String] = Future.successful(s"$a-$b-$c")
     def echoBool(b: Boolean): Future[Boolean] = Future.successful(b)
     def findRenamed(id: Int): Future[User] = Future.successful(User(id, "renamed"))
+    def configure(timeout: Option[Int]): Unit = ()
 
   // real -> raw -> real: the full materialized stack the law runs every generated input through
   // (derived once in `SampleApiCodec`, including the `users` get-arm's sub-RPC conversion, and shared).

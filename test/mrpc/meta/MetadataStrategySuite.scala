@@ -13,9 +13,9 @@ class MetadataStrategySuite extends munit.FunSuite:
 
   private lazy val md: ApiInfo[SampleApi] = ApiInfo.materialize[SampleApi]
 
-  test("@rpcMethodMetadata @multi projection: one entry per RPC method (9 ops)"):
-    // distinct methods (overloads counted separately) -> 9 ops for SampleApi
-    assertEquals(md.methods.size, 9)
+  test("@rpcMethodMetadata @multi projection: one entry per RPC method (10 ops)"):
+    // distinct methods (overloads counted separately) -> 10 ops for SampleApi
+    assertEquals(md.methods.size, 10)
 
   test("@rpcParamMetadata @multi projection: params is the per-param, declaration-order projection"):
     val combine = md.methods.find(_.label == "combine").get
