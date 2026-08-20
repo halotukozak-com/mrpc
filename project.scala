@@ -1,4 +1,4 @@
-//> using scala 3.9.0-RC4
+//> using scala 3.9.0-RC6
 
 //> using dep com.halotukozak::mcodec::0.1.2
 
