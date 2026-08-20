@@ -1,7 +1,7 @@
-package mrpc.meta
+package halotukozak.mrpc.meta
 
-import mrpc.Fallback
-import mrpc.derive.SampleApi.SampleApi
+import halotukozak.mrpc.Fallback
+import halotukozak.mrpc.derive.SampleApi.SampleApi
 
 import scala.annotation.unused
 

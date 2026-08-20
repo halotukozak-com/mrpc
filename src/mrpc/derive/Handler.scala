@@ -1,8 +1,8 @@
-package mrpc
+package halotukozak.mrpc
 package derive
 
-import mrpc.conv.{AsRaw, AsReal}
-import mrpc.raw.{RawInvocation, RawRpc}
+import halotukozak.mrpc.conv.{AsRaw, AsReal}
+import halotukozak.mrpc.raw.{RawInvocation, RawRpc}
 
 import scala.annotation.tailrec
 import scala.concurrent.ExecutionContext
@@ -42,7 +42,7 @@ object Handler:
   ): Any =
     val invocation = RawInvocation[Raw](
       compiletime.constValue[Name],
-      splitBySizes(encodeArgs[Raw](tup), scala.compiletime.constValueTuple[Lists].toList.asInstanceOf[List[Int]]),
+      splitBySizes(encodeArgs[Raw](tup), compiletime.constValueTuple[Lists].toList.asInstanceOf[List[Int]]),
     )
     inline compiletime.erasedValue[Plan] match
       case plan =>

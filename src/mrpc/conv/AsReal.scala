@@ -1,6 +1,6 @@
-package mrpc.conv
+package halotukozak.mrpc.conv
 
-import mrpc.Fallback
+import halotukozak.mrpc.Fallback
 
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.Try

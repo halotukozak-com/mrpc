@@ -1,7 +1,6 @@
-package mrpc.raw
+package halotukozak.mrpc.raw
 
-import scala.concurrent.duration.DurationInt
-import scala.concurrent.{Await, ExecutionContext, Future}
+import scala.concurrent.{ExecutionContext, Future}
 import scala.collection.mutable
 
 class RawRpcSuite extends munit.FunSuite:
@@ -36,16 +35,16 @@ class RawRpcSuite extends munit.FunSuite:
 
   test("call dispatches by rpcName and returns Future[Raw]"):
     val rpc = StringRpc(mutable.Buffer.empty)
-    val result = Await.result(rpc.call(RawInvocation[String]("add", List(List("2", "40")))), 1.second)
+    val result = rpc.call(RawInvocation[String]("add", List(List("2", "40")))).value.get.get
     assertEquals(result, "42")
 
   test("call fails for an unknown rpcName"):
     val rpc = StringRpc(mutable.Buffer.empty)
     intercept[NoSuchElementException]:
-      Await.result(rpc.call(RawInvocation[String]("nope", Nil)), 1.second)
+      rpc.call(RawInvocation[String]("nope", Nil)).value.get.get
 
   test("get returns a nested RawRpc that itself dispatches"):
     val rpc = StringRpc(mutable.Buffer.empty)
     val nested = rpc.get(RawInvocation[String]("sub", Nil))
-    val result = Await.result(nested.call(RawInvocation[String]("add", List(List("1", "2")))), 1.second)
+    val result = nested.call(RawInvocation[String]("add", List(List("1", "2")))).value.get.get
     assertEquals(result, "3")

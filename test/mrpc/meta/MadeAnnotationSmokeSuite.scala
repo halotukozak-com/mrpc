@@ -1,8 +1,8 @@
-package mrpc.meta
+package halotukozak.mrpc.meta
 
-import made.*
-import mrpc.annotation.{multi, rpcName}
-import mrpc.derive.SampleApi.SampleApi
+import halotukozak.made.*
+import halotukozak.mrpc.annotation.{multi, rpcName}
+import halotukozak.mrpc.derive.SampleApi.SampleApi
 
 /**
  * Wave-0 made-artifact smoke (Phase 10, Plan 01, Task 1).

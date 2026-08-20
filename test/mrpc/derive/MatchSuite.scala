@@ -1,4 +1,4 @@
-package mrpc.derive
+package halotukozak.mrpc.derive
 
 /**
  * `matchFrom` compiles a runtime string dispatch directly off a `NamedTuple`'s field names: one

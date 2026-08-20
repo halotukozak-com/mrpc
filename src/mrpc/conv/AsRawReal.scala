@@ -1,4 +1,4 @@
-package mrpc.conv
+package halotukozak.mrpc.conv
 
 /** Combines [[AsRaw]] and [[AsReal]] into a single bidirectional conversion. */
 trait AsRawReal[Raw, Real] extends AsReal[Raw, Real], AsRaw[Raw, Real]
@@ -27,5 +27,5 @@ private[conv] trait AsRawRealLowPrio extends AsRawRealLowestPrio:
 
 /** Lowest-priority instance, below `fromSeparate` too — `Fallback` is meant as a last resort. */
 private[conv] trait AsRawRealLowestPrio:
-  given fromFallback[Raw, Real](using fallback: mrpc.Fallback[AsRawReal[Raw, Real]]): AsRawReal[Raw, Real] =
+  given fromFallback[Raw, Real](using fallback: halotukozak.mrpc.Fallback[AsRawReal[Raw, Real]]): AsRawReal[Raw, Real] =
     fallback.value

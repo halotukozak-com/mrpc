@@ -1,4 +1,4 @@
-package mrpc.conv
+package halotukozak.mrpc.conv
 
 class AsRawRealSuite extends munit.FunSuite:
   test("identity AsRawReal resolves without ambiguity and round-trips"):

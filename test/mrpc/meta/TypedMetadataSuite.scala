@@ -1,7 +1,7 @@
-package mrpc.meta
+package halotukozak.mrpc.meta
 
-import mrpc.annotation.{infer, multi, reifyAnnot, reifyName, rpcMethodMetadata}
-import mrpc.derive.SampleApi.SampleApi
+import halotukozak.mrpc.annotation.{infer, multi, reifyAnnot, reifyName, rpcMethodMetadata}
+import halotukozak.mrpc.derive.SampleApi.SampleApi
 
 // A trivially-summonable given typeclass, so @infer is deterministic regardless of the result type.
 final class MethodTag[T]
@@ -13,7 +13,7 @@ object MethodTag:
 final case class MethodMeta[T](
   @reifyName name: String,
   @reifyName(useRawName = true) rawName: String,
-  @reifyAnnot rpcNameAnnot: Option[mrpc.annotation.rpcName],
+  @reifyAnnot rpcNameAnnot: Option[halotukozak.mrpc.annotation.rpcName],
   @infer tag: MethodTag[T],
 ) extends TypedMetadata[T]
 

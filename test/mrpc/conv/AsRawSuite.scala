@@ -1,8 +1,7 @@
-package mrpc.conv
+package halotukozak.mrpc.conv
 
-import scala.concurrent.{Await, Future}
+import scala.concurrent.Future
 import scala.concurrent.ExecutionContext.parasitic
-import scala.concurrent.duration.DurationInt
 import scala.util.{Success, Try}
 
 class AsRawSuite extends munit.FunSuite:
@@ -18,5 +17,5 @@ class AsRawSuite extends munit.FunSuite:
     // Distinct Raw/Real so forFuture (not identity) is selected and the EC is exercised.
     given AsRaw[String, Int] = (i: Int) => i.toString
     val instance = summon[AsRaw[Future[String], Future[Int]]]
-    val result = Await.result(instance.asRaw(Future.successful(2)), 1.second)
+    val result = instance.asRaw(Future.successful(2)).value.get.get
     assertEquals(result, "2")
