@@ -1,11 +1,10 @@
-package mrpc.transport
+package halotukozak.mrpc.transport
 
-import scala.concurrent.duration.Duration
-import scala.concurrent.{Await, ExecutionContext, Future}
+import scala.concurrent.{ExecutionContext, Future}
 
-import mrpc.conv.{AsRaw, AsReal}
-import mrpc.derive.SampleApi.*
-import mrpc.raw.RawRpc
+import halotukozak.mrpc.conv.{AsRaw, AsReal}
+import halotukozak.mrpc.derive.SampleApi.*
+import halotukozak.mrpc.raw.RawRpc
 
 /**
  * The full real->raw->transport->raw->real round-trip over the sample trait: the bare loopback passes
@@ -20,10 +19,10 @@ import mrpc.raw.RawRpc
 class InMemoryTransportSuite extends munit.FunSuite:
 
   // Leaf JSON codec givens + parasitic EC must be in scope where both directions materialize.
-  import mrpc.codec.JsonRawValue.given
+  import halotukozak.mrpc.codec.JsonRawValue.given
   given ExecutionContext = ExecutionContext.parasitic
 
-  private def await[A](f: Future[A]): A = Await.result(f, Duration.Inf)
+  private def await[A](f: Future[A]): A = f.value.get.get
 
   private var pinged: Boolean = false
 

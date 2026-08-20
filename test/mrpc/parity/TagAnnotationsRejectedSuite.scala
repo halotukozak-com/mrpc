@@ -1,4 +1,4 @@
-package mrpc.parity
+package halotukozak.mrpc.parity
 
 /**
  * `@methodTag`/`@paramTag`/`@tagged` used to compile and silently do nothing under mrpc's fixed
@@ -11,8 +11,8 @@ class TagAnnotationsRejectedSuite extends munit.FunSuite:
     val errors = compileErrors(
       """
       import scala.concurrent.{ExecutionContext, Future}
-      import mrpc.annotation.{methodTag, RpcTag}
-      import mrpc.raw.RawRpcCompanion
+      import halotukozak.mrpc.annotation.{methodTag, RpcTag}
+      import halotukozak.mrpc.raw.RawRpcCompanion
 
       sealed trait RestTag extends RpcTag
       final class GET extends RestTag
@@ -34,8 +34,8 @@ class TagAnnotationsRejectedSuite extends munit.FunSuite:
     val errors = compileErrors(
       """
       import scala.concurrent.{ExecutionContext, Future}
-      import mrpc.annotation.{paramTag, RpcTag}
-      import mrpc.raw.RawRpcCompanion
+      import halotukozak.mrpc.annotation.{paramTag, RpcTag}
+      import halotukozak.mrpc.raw.RawRpcCompanion
 
       sealed trait HeaderTag extends RpcTag
       final class Header extends HeaderTag
@@ -57,8 +57,8 @@ class TagAnnotationsRejectedSuite extends munit.FunSuite:
     val errors = compileErrors(
       """
       import scala.concurrent.{ExecutionContext, Future}
-      import mrpc.annotation.{tagged, RpcTag}
-      import mrpc.raw.RawRpcCompanion
+      import halotukozak.mrpc.annotation.{tagged, RpcTag}
+      import halotukozak.mrpc.raw.RawRpcCompanion
 
       sealed trait RestTag extends RpcTag
       final class GET extends RestTag
@@ -79,8 +79,8 @@ class TagAnnotationsRejectedSuite extends munit.FunSuite:
     val errors = compileErrors(
       """
       import scala.concurrent.ExecutionContext
-      import mrpc.annotation.{tagged, RpcTag}
-      import mrpc.raw.RawRpcCompanion
+      import halotukozak.mrpc.annotation.{tagged, RpcTag}
+      import halotukozak.mrpc.raw.RawRpcCompanion
 
       sealed trait RestTag extends RpcTag
       final class GET extends RestTag

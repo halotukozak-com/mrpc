@@ -6,3 +6,4 @@ scala-doc
 
 # IntelliJ IDEA project files
 .idea/
+debug.json

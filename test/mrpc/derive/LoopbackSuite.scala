@@ -1,12 +1,11 @@
-package mrpc.derive
+package halotukozak.mrpc.derive
 
-import scala.concurrent.duration.Duration
-import scala.concurrent.{Await, ExecutionContext, Future}
+import scala.concurrent.{ExecutionContext, Future}
 
-import mrpc.conv.{AsRaw, AsReal}
-import mrpc.derive.SampleApi.*
-import mrpc.raw.RawRpc
-import mrpc.transport.InMemoryTransport
+import halotukozak.mrpc.derive.SampleApi.*
+import halotukozak.mrpc.derive.SampleApi.SampleApiCodec.{selfRaw, selfReal}
+import halotukozak.mrpc.raw.RawRpc
+import halotukozak.mrpc.transport.InMemoryTransport
 
 /**
  * The headline real->raw->real loopback over the sample trait: materialize a real `SampleApi` impl
@@ -18,7 +17,7 @@ class LoopbackSuite extends munit.FunSuite:
 
   // The leaf JSON codec givens and a parasitic ExecutionContext must be in scope where both
   // directions are materialized (the abstract-Raw summon proof established this placement).
-  import mrpc.codec.JsonRawValue.given
+  import halotukozak.mrpc.codec.JsonRawValue.given
   given ExecutionContext = ExecutionContext.parasitic
 
   private var pinged: Boolean = false
@@ -36,26 +35,14 @@ class LoopbackSuite extends munit.FunSuite:
     def echoBool(b: Boolean): Future[Boolean] = Future.successful(b)
     def findRenamed(id: Int): Future[User] = Future.successful(User(id, "renamed"))
 
-  // The non-recursive sub-RPC conversions both directions route through (the get/recursion seams
-  // summon these). Bound as givens so the eager summon inside each derivation resolves.
-  private given AsRaw[RawRpc[String], UsersRpc] = SampleApiCodec.materializeAsRaw[UsersRpc]
-  private given AsReal[RawRpc[String], UsersRpc] = SampleApiCodec.materializeAsReal[UsersRpc]
-
-  // Self-referential wiring (RecursionSuite's lazy-val-given-read-back-through-makeLazy placement):
-  // SelfRpc.child returns SelfRpc, so the seam's nested summon must resolve to this lazy placeholder
-  // rather than re-deriving forever. Added here so the loopback also covers the recursion arity.
-  private lazy val selfRaw: AsRaw[RawRpc[String], SelfRpc] =
-    AsRaw.makeLazy(SampleApiCodec.materializeAsRaw[SelfRpc])
-  private lazy val selfReal: AsReal[RawRpc[String], SelfRpc] =
-    AsReal.makeLazy(SampleApiCodec.materializeAsReal[SelfRpc])
-  private given AsRaw[RawRpc[String], SelfRpc] = selfRaw
-  private given AsReal[RawRpc[String], SelfRpc] = selfReal
+  // The non-recursive sub-RPC conversion (get/recursion seams) and the self-referential wiring
+  // (`selfRaw`/`selfReal`, imported above) are derived once in `SampleApiCodec` and shared here.
 
   // real -> raw (server adapter) -> real (client proxy): the full loopback under test.
-  private val rawRpc: RawRpc[String] = SampleApiCodec.materializeAsRaw[SampleApi].asRaw(impl)
-  private val proxy: SampleApi = SampleApiCodec.materializeAsReal[SampleApi].asReal(rawRpc)
+  private val rawRpc: RawRpc[String] = SampleApiCodec.sampleApiRaw.asRaw(impl)
+  private val proxy: SampleApi = SampleApiCodec.sampleApiReal.asReal(rawRpc)
 
-  private def await[A](f: Future[A]): A = Await.result(f, Duration.Inf)
+  private def await[A](f: Future[A]): A = f.value.get.get
 
   test("a call op round-trips real->raw->real and returns the right value"):
     assertEquals(await(proxy.increment(41)), 42)
@@ -86,8 +73,8 @@ class LoopbackSuite extends munit.FunSuite:
 
   test("the full stack round-trips through an in-memory transport hop"):
     // real -> raw -> TRANSPORT -> raw -> real: the loopback with InMemoryTransport sandwiched in.
-    val transported: RawRpc[String] = new InMemoryTransport(SampleApiCodec.materializeAsRaw[SampleApi].asRaw(impl))
-    val tProxy: SampleApi = SampleApiCodec.materializeAsReal[SampleApi].asReal(transported)
+    val transported: RawRpc[String] = new InMemoryTransport(SampleApiCodec.sampleApiRaw.asRaw(impl))
+    val tProxy: SampleApi = SampleApiCodec.sampleApiReal.asReal(transported)
     assertEquals(await(tProxy.increment(41)), 42)
     // a sub-RPC getter crosses the transport boundary (re-wrapped) before reaching the impl.
     assertEquals(await(tProxy.users.count()), 7)
