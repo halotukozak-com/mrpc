@@ -35,4 +35,5 @@ object AsRaw extends AsRawLowPrio:
 
 /** Lowest-priority instances, so a `Fallback[AsRaw[Raw, Real]]` never out-competes a normal given. */
 private[conv] trait AsRawLowPrio:
-  given fromFallback[Raw, Real](using fallback: halotukozak.mrpc.Fallback[AsRaw[Raw, Real]]): AsRaw[Raw, Real] = fallback.value
+  given fromFallback[Raw, Real](using fallback: halotukozak.mrpc.Fallback[AsRaw[Raw, Real]]): AsRaw[Raw, Real] =
+    fallback.value
