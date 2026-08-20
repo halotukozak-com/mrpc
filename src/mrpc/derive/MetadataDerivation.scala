@@ -1,7 +1,8 @@
-package mrpc
+package halotukozak.mrpc
 package derive
 
-import made.*
+import halotukozak.commons.*
+import halotukozak.made.*
 
 import scala.annotation.{tailrec, Annotation}
 import scala.quoted.{Expr, Quotes, Type}
@@ -9,7 +10,7 @@ import scala.quoted.{Expr, Quotes, Type}
 /**
  * The metadata-class-param-driven `materialize` macro. Unlike a blind `Done`-walk emitting a fixed flat
  * shape, this is driven by the METADATA CLASS `M`'s primary-constructor params: it reads each param's
- * steering annotation, classifies it, and fills it from the real trait's `made.Done` structure. The
+ * steering annotation, classifies it, and fills it from the real trait's `halotukozak.made.Done` structure. The
  * emitted value is `new M[Real](<filled params>)`.
  *
  * Steering vocabulary honored:
@@ -47,7 +48,7 @@ private[mrpc] object MetadataDerivation:
       type Ops <: Tuple /* of DoneOperation */
       type Names <: Tuple /* of String */
 
-      given Ops containsOnly made.DoneOperation = compiletime.deferred
+      given Ops containsOnly halotukozak.made.DoneOperation = compiletime.deferred
       given Names containsOnly String = compiletime.deferred
 
       def operations: Ops
@@ -58,7 +59,7 @@ private[mrpc] object MetadataDerivation:
       // per-op refined types (and with them, each op's captured `Metadata`) at the parameter
       // boundary; `ops.type` inside the return type then just resolves back to that widened `Tuple`.
       // A type parameter, inferred from the argument's OWN static type, preserves it end-to-end.
-      def apply[ops <: Tuple, names <: Tuple](ops0: ops)(using ops containsOnly DoneOperation, names containsOnly String)
+      def apply[ops <: Tuple: Of[DoneOperation], names <: Tuple: Of[String]](ops0: ops)
         : Trait { type Ops = ops; type Names = names } = new Trait:
         override type Names = names
         override type Ops = ops
@@ -92,12 +93,10 @@ private[mrpc] object MetadataDerivation:
         override type P = pT
         override val underlying: pT = p
 
-  inline def impl[M[_], Real, Ops <: Tuple](
+  inline def impl[M[_], Real, Ops <: Tuple: Of[DoneOperation]](
     operations: Ops,
     names: Tuple,
-  )(using
-    Ops containsOnly DoneOperation,
-    names.type containsOnly String,
+  )(using names.type containsOnly String,
   )(using made: Made.Of[M[Real]],
   ): M[Real] =
     val ctx = Context.Trait[Ops, names.type](operations)
@@ -127,30 +126,30 @@ private[mrpc] object MetadataDerivation:
         report.errorAndAbort("@reifyName: no @reifyName annotation found on the metadata param's type chain")
       case '[t *: ts] =>
         TypeRepr.of[t] match
-          case AnnotatedType(_, annot) if annot.tpe <:< TypeRepr.of[mrpc.annotation.reifyName] =>
-            annot.asExprOf[mrpc.annotation.reifyName] match
+          case AnnotatedType(_, annot) if annot.tpe <:< TypeRepr.of[halotukozak.mrpc.annotation.reifyName] =>
+            annot.asExprOf[halotukozak.mrpc.annotation.reifyName] match
               case Expr(x) => Expr(x.useRawName)
 
     loop[M]
 
   transparent inline private def arity(e: MadeElem): SlotArity =
-    inline if e.hasAnnotation[mrpc.annotation.multi] then SlotArity.Multi
-    else inline if e.hasAnnotation[mrpc.annotation.optional] then SlotArity.Optional
+    inline if e.hasAnnotation[halotukozak.mrpc.annotation.multi] then SlotArity.Multi
+    else inline if e.hasAnnotation[halotukozak.mrpc.annotation.optional] then SlotArity.Optional
     else SlotArity.Single
 
   inline private def fillParam(e: MadeElem)(using Context) =
-    inline if e.hasAnnotation[mrpc.annotation.composite] then composite[e.Type]
-    else inline if e.hasAnnotation[mrpc.annotation.reifyName] then reifyName(e.getUserRawName)
-    else inline if e.hasAnnotation[mrpc.annotation.reifyAnnot] then reifyAnnot[e.Type](arity(e))
-    else inline if e.hasAnnotation[mrpc.annotation.rpcMethodMetadata] then
+    inline if e.hasAnnotation[halotukozak.mrpc.annotation.composite] then composite[e.Type]
+    else inline if e.hasAnnotation[halotukozak.mrpc.annotation.reifyName] then reifyName(e.getUserRawName)
+    else inline if e.hasAnnotation[halotukozak.mrpc.annotation.reifyAnnot] then reifyAnnot[e.Type](arity(e))
+    else inline if e.hasAnnotation[halotukozak.mrpc.annotation.rpcMethodMetadata] then
       inline ctx match
         case ctx: Context.Trait => rpcMethodMetadata[e.Type, e.Label](arity(e))(using ctx)
-    else inline if e.hasAnnotation[mrpc.annotation.rpcParamMetadata] then
+    else inline if e.hasAnnotation[halotukozak.mrpc.annotation.rpcParamMetadata] then
       inline ctx match
         case ctx: Context.Method => rpcParamMetadata[e.Type, e.Label](arity(e))(using ctx)
-    else inline if e.hasAnnotation[mrpc.annotation.infer] then compiletime.summonInline[e.Type]
-    else inline if e.hasAnnotation[mrpc.annotation.reifyParamListCount] then reifyParamListCount
-    else inline if e.hasAnnotation[mrpc.annotation.isAnnotated[?]] then isAnnotated[e.Metadata]
+    else inline if e.hasAnnotation[halotukozak.mrpc.annotation.infer] then compiletime.summonInline[e.Type]
+    else inline if e.hasAnnotation[halotukozak.mrpc.annotation.reifyParamListCount] then reifyParamListCount
+    else inline if e.hasAnnotation[halotukozak.mrpc.annotation.isAnnotated[?]] then isAnnotated[e.Metadata]
     else
       compiletime.error(
         "metadata param '" + compiletime.constValue[e.Label] + "' has no recognized steering annotation " +
@@ -225,9 +224,8 @@ private[mrpc] object MetadataDerivation:
    * Each element recurses `buildValue` in a per-op [[Context.Method]].
    */
 
-  inline private def buildAllMethodElems[e, Names <: Tuple](
+  inline private def buildAllMethodElems[e, Names <: Tuple: Of[String]](
     ops: Tuple,
-  )(using Names containsOnly String,
   )(using ops.type containsOnly DoneOperation,
   ): Tuple =
     inline (ops, compiletime.erasedValue[Names]) match
@@ -312,7 +310,7 @@ private[mrpc] object MetadataDerivation:
   private def isAnnotatedImpl[SlotMeta <: Tuple: Type, TargetMeta <: Tuple: Type](using quotes: Quotes): Expr[Boolean] =
     import quotes.reflect.*
 
-    val isAnnotatedSym = Symbol.classSymbol("mrpc.annotation.isAnnotated")
+    val isAnnotatedSym = Symbol.classSymbol("halotukozak.mrpc.annotation.isAnnotated")
 
     @tailrec
     def findTarget[Tup <: Tuple: Type](using Quotes): TypeRepr =

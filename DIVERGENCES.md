@@ -88,18 +88,23 @@ divergence rather than pretend the two models are identical.
   (scientific-notation numbers, escaping, field-order sensitivity) could still
   diverge between mcodec and GenCodec and would then need normalization.
 
-## D7 — `@optional` / `@whenAbsent` / `@multi` collection extraction
+## D7 — `@whenAbsent` and multi-slot `@multi` extraction
 
-- **mrpc:** the `@optional`/`@whenAbsent` arity and the full `@multi`-collection
-  extraction chain are not implemented in v1.
+- **mrpc:** a single param/result whose real type is already `Option[T]`/`List[T]`
+  round-trips through the ordinary leaf codec — no special arity handling needed,
+  since `Option`/`List` already have codecs. `optional_configure_*` and
+  `multi_broadcast` in `GoldenFixtureSuite` cover this. Not implemented:
+  `@whenAbsent` (a raw-side default value substituted when decoding fails/is
+  absent, distinct from an `Option` simply being `None`), and commons' true
+  `@multi` semantics of collecting **several separate raw slots** into one
+  collection (or a `@multi` raw method carrying a `@methodName` param to route
+  across several real methods) — mrpc's fixed `RawRpc` has no such raw-slot
+  model to collect from.
 - **commons:** a full arity/default chain (optional params, absent-value defaults,
-  multi-value collection extraction).
-- **Why:** these are scheduled for a later iteration; v1 targets the core
-  fire/call/get model.
-- **Parity treatment:** the `optional_*` golden fixtures (`configure` with a `null`
-  / present optional value) are **excluded** from the parity assertions and marked
-  visibly pending, with this entry as the documented reason. They are kept (not
-  deleted) so they guide the later work.
+  multi-value collection extraction across raw slots).
+- **Why:** the deeper mechanism needs the generic raw-method framework (D9);
+  what a single already-collection-shaped param needs is just its own codec.
+- **Parity treatment:** `@whenAbsent` and multi-slot extraction not ported.
 
 ## D8 — Generic methods, varargs, `@composite`, interceptors
 

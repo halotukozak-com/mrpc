@@ -83,10 +83,6 @@ the wrap-once rule yields `[[["a","b","c"]]]`.
 
 These fixtures are asserted against the raw invocation the client proxy emits.
 Where mrpc deliberately deviates from commons (nested args, abstract `Raw`,
-signature-hash overload suffixes, `@optional` extraction, mcodec-vs-GenCodec JSON
-at the leaf), the deviation is catalogued — not papered over. Deliberate
-deviations from commons are documented in [DIVERGENCES.md](../DIVERGENCES.md).
-
-In particular: the `optional_configure_*` fixtures are out of scope for v1
-(`@optional`, see divergence D7) and are excluded from the parity assertions
-rather than silently passing.
+signature-hash overload suffixes, mcodec-vs-GenCodec JSON at the leaf), the
+deviation is catalogued — not papered over. Deliberate deviations from commons
+are documented in [DIVERGENCES.md](../DIVERGENCES.md).

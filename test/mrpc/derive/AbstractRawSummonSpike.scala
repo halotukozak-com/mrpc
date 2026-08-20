@@ -1,11 +1,11 @@
-package mrpc.derive
+package halotukozak.mrpc.derive
 
 import scala.concurrent.{ExecutionContext, Future}
 
-import mcodec.MCodec
+import halotukozak.mcodec.MCodec
 
-import mrpc.conv.{AsRaw, AsReal}
-import mrpc.raw.RawRpcCompanion
+import halotukozak.mrpc.conv.{AsRaw, AsReal}
+import halotukozak.mrpc.raw.RawRpcCompanion
 
 /**
  * Compile-only de-risking proof for the single biggest open question of the derivation engine:
@@ -32,7 +32,7 @@ object AbstractRawSummonSpike:
   // placement the derivation macros will rely on: leaf givens imported alongside the companion, with
   // the threaded `ExecutionContext` the `call` arity needs for `forFuture` composition.
   object Concrete extends RawRpcCompanion[String]:
-    import mrpc.codec.JsonRawValue.given
+    import halotukozak.mrpc.codec.JsonRawValue.given
 
     given ExecutionContext = ExecutionContext.parasitic
 

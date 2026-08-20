@@ -1,8 +1,8 @@
-package mrpc.codec
+package halotukozak.mrpc.codec
 
 import org.scalacheck.{Arbitrary, Gen}
 import org.scalacheck.Prop.forAll
-import mrpc.codec.LeafCodecFixture.{roundTrip, User}
+import halotukozak.mrpc.codec.LeafCodecFixture.{roundTrip, User}
 
 class LeafCodecProps extends munit.ScalaCheckSuite:
 

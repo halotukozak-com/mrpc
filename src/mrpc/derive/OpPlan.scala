@@ -1,7 +1,8 @@
-package mrpc
+package halotukozak.mrpc
 package derive
 
-import made.*
+import halotukozak.commons.{containsOnly, realCons, Of}
+import halotukozak.made.*
 
 import scala.concurrent.Future
 import scala.quoted.{Expr, Quotes, Type}
@@ -45,8 +46,10 @@ object ParamPlan:
   // @tagged has no branch to steer under the fixed fire/call/get RawRpc (D9), so reject rather than
   // silently ignore it (D10). `tagged[?]` matches any instantiation despite tagged being invariant.
   transparent inline private def encodingOf(ie: InputElem): EncodingTag =
-    inline if ie.hasAnnotation[mrpc.annotation.tagged[?]] then compiletime.error(noTagSelectionBranch("@tagged"))
-    else inline if ie.hasAnnotation[mrpc.annotation.verbatim] && isRawCarrier[ie.Type] then EncodingTag.Verbatim
+    inline if ie.hasAnnotation[halotukozak.mrpc.annotation.tagged[?]] then
+      compiletime.error(noTagSelectionBranch("@tagged"))
+    else inline if ie.hasAnnotation[halotukozak.mrpc.annotation.verbatim] && isRawCarrier[ie.Type] then
+      EncodingTag.Verbatim
     else EncodingTag.Encoded
 
   inline def apply(ie: InputElem, encodingTag: EncodingTag)
@@ -90,7 +93,8 @@ object OpPlan:
     case _ => ArityTag.Get[Output]
 
   transparent inline def materialize[Name <: String](op: DoneOperation): OpPlan =
-    inline if op.hasAnnotation[mrpc.annotation.tagged[?]] then compiletime.error(noTagSelectionBranch("@tagged"))
+    inline if op.hasAnnotation[halotukozak.mrpc.annotation.tagged[?]] then
+      compiletime.error(noTagSelectionBranch("@tagged"))
     else build[op.type, Name, op.Label, op.ParamLists](arityOf[op.OutputType], buildParams(op.inputElems))
 
   transparent inline def build[Op <: DoneOperation, Name <: String, label <: String, Lists <: Tuple](
@@ -125,16 +129,15 @@ object OpPlan:
 object Plans:
   // @methodTag/@paramTag are conventionally declared on the trait (see AnnotationCaptureSuite).
   transparent inline def materialize[T: {Done.Of as done}](names: Tuple)(using names.type containsOnly String): Tuple =
-    inline if done.hasAnnotation[mrpc.annotation.methodTag[?]] then compiletime.error(noTagSelectionBranch("@methodTag"))
-    else inline if done.hasAnnotation[mrpc.annotation.paramTag[?]] then
+    inline if done.hasAnnotation[halotukozak.mrpc.annotation.methodTag[?]] then
+      compiletime.error(noTagSelectionBranch("@methodTag"))
+    else inline if done.hasAnnotation[halotukozak.mrpc.annotation.paramTag[?]] then
       compiletime.error(noTagSelectionBranch("@paramTag"))
     else buildAll[names.type](done.operations)
 
-  transparent inline private def buildAll[Names <: Tuple](
+  transparent inline private def buildAll[Names <: Tuple: Of[String]](
     operations: Tuple,
-  )(using
-    Names containsOnly String,
-    operations.type containsOnly DoneOperation,
+  )(using operations.type containsOnly DoneOperation,
   ): Tuple = inline compiletime.erasedValue[Names] match
     case _: EmptyTuple => EmptyTuple
     case _: (name *: nextNames) =>

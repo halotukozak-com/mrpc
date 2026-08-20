@@ -1,7 +1,7 @@
-package mrpc.meta
+package halotukozak.mrpc.meta
 
-import mrpc.annotation.{isAnnotated, multi, reifyName, reifyParamListCount, rpcMethodMetadata, rpcName}
-import mrpc.derive.SampleApi.SampleApi
+import halotukozak.mrpc.annotation.{isAnnotated, multi, reifyName, reifyParamListCount, rpcMethodMetadata, rpcName}
+import halotukozak.mrpc.derive.SampleApi.SampleApi
 
 /**
  * DIVERGENCES.md D16: `@isAnnotated[A]` (plain presence check, unlike `@reifyAnnot`'s arity-shaped

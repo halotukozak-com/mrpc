@@ -1,4 +1,4 @@
-package mrpc.conv
+package halotukozak.mrpc.conv
 
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.Try
