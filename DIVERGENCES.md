@@ -115,3 +115,163 @@ divergence rather than pretend the two models are identical.
 - **Why:** mrpc's `RawRpc` is intentionally fixed to `fire`/`call`/`get`; the
   generic raw-method machinery is a much larger surface deferred past v1.
 - **Parity treatment:** not ported. Documented here as an explicit scope boundary.
+
+## D9 — `RawRpc` is a fixed trait, not the generic raw-method framework
+
+- **mrpc:** `RawRpc[Raw]` (`src/mrpc/raw/RawRpc.scala`) is a single, closed trait
+  with exactly three methods (`fire`/`call`/`get`), chosen structurally from each
+  real method's result type (`Unit` / `Future[_]` / anything else).
+- **commons:** there is no fixed raw trait at all. Any user-declared trait can
+  serve as a raw RPC trait, with arbitrary method names/shapes (see
+  `core/src/test/scala/com/avsystem/commons/rpc/NewRawRpc.scala`, which declares
+  raw methods named `doSomething`, `post`, `prefix`, etc.). `fire`/`call`/`get`
+  only exist as one convenience layer (`StandardRPCFramework`,
+  `core/src/main/scala/com/avsystem/commons/rpc/StandardRPCFramework.scala`)
+  built on top of that generic mechanism — commons users can bypass it entirely.
+- **Why:** mrpc deliberately targets the `StandardRPCFramework`-equivalent
+  surface, not the fully generic layer underneath it; a generic
+  arbitrary-raw-trait framework is a substantially larger macro-engine redesign.
+- **Parity treatment:** not ported; this is the root scope decision that D8's
+  more specific omissions (generic methods, `@composite` on raw params,
+  interceptors, tagging-driven multi-raw-method routing) all fall out of. Not a
+  bug — a named architecture boundary.
+
+## D10 — `@methodTag`/`@paramTag`/`@tagged`/`RpcTag` have no dispatch effect (now a compile error)
+
+- **mrpc:** `methodTag`, `paramTag`, `tagged`, and the `RpcTag` base trait exist
+  as annotations (`src/mrpc/annotation/tags.scala`) and are captured as
+  metadata (`AnnotationCaptureSuite`), but **no derivation or dispatch code
+  reads them for routing purposes** — they do not select between raw method
+  variants, do not filter matching, and have no effect on `fire`/`call`/`get`
+  routing. **Fixed (2026-08-08):** attaching any of them is now a compile
+  error instead of silently compiling to a no-op — a plain `hasAnnotation[X[?]]`
+  guard (the wildcard matches every instantiation despite `tagged`/`methodTag`/
+  `paramTag` being invariant in their type parameter) in `Plans.materialize`
+  (trait-level `@methodTag`/`@paramTag`, mirroring where `AnnotationCaptureSuite`
+  places them) and in `OpPlan.materialize`/`ParamPlan.encodingOf` (method-/
+  param-level `@tagged`) — see `test/mrpc/parity/TagAnnotationsRejectedSuite.scala`.
+- **commons:** `@methodTag`/`@paramTag` (declared on the raw trait) plus
+  `@tagged[Tag](whenUntagged)` (declared on a raw method/param) actively steer
+  which real methods/params a given raw method/param may match — this is how
+  commons expresses e.g. GET-vs-POST-style routing over one real API
+  (`core/src/main/scala/com/avsystem/commons/rpc/rpcAnnotations.scala:273-333`,
+  exercised end-to-end in `NewRawRpc.scala` + `NewRpcMetadataTest.scala`).
+- **Why:** tag-driven routing only makes sense against multiple raw method
+  variants per real method, which requires the generic raw-method framework
+  (D9). With a fixed three-method `RawRpc`, there is nothing for a tag to
+  select between — but a silent no-op was a landmine, so it now fails loudly
+  instead.
+- **Parity treatment:** still not implemented (real tag-driven routing needs
+  D9 first); the gap is the same, only the failure mode changed from silent to
+  loud. `test/mrpc/parity/TagAnnotationsRejectedSuite.scala` locks in the
+  compile-error behavior for `@methodTag`/`@paramTag`/`@tagged` (method and
+  param position) so this cannot regress back to a silent no-op unnoticed.
+
+## D11 — No encoding/decoding interceptors
+
+- **mrpc:** no equivalent of `EncodingInterceptor`/`DecodingInterceptor` exists.
+- **commons:** `EncodingInterceptor[NewRaw, Raw]`/`DecodingInterceptor[NewRaw, Raw]`
+  (`rpc/rpcAnnotations.scala:178-202`) let a real param/method redirect its
+  `AsRaw`/`AsReal` lookup to a different type and then run a final
+  `NewRaw <-> Raw` conversion function — a per-parameter value transform layered
+  on top of normal (de)serialization (e.g. `@prepend("bul:")` on a `Boolean`
+  param in `TestRPC.scala`).
+- **Why:** deferred past v1 along with the rest of D8/D9's generic-framework
+  surface.
+- **Parity treatment:** not ported.
+
+## D12 — No `@tried` auto-`Try`-wrapping
+
+- **mrpc:** a `call`-arity method's result is always `Future[Raw]`; there is no
+  annotation to make a raw method's result auto-wrap in `Try[_]`.
+- **commons:** `@tried` (`rpc/rpcAnnotations.scala`) wraps a raw method's result
+  in `Try[_]` automatically. Note mrpc's leaf `AsRaw.forTry`/`AsReal.forTry`
+  (`src/mrpc/conv/AsRaw.scala:16`, `AsReal.scala:16`) already provide the
+  underlying `Try` typeclass instance "for commons parity" — only the
+  engine-level annotation that triggers automatic wrapping is missing.
+- **Why:** no arity variant currently produces a raw method returning
+  `Future[Try[Raw]]`/`Try[Raw]`.
+- **Parity treatment:** not ported.
+
+## D13 — No `@unmatched`/`@unmatchedParam` custom compile errors
+
+- **mrpc:** an unmatched raw/real element always reports the derivation macro's
+  generic diagnostic.
+- **commons:** `@unmatched(error)`/`@unmatchedParam[Tag](error)`
+  (`rpc/rpcAnnotations.scala:213-225`) let a raw method/param author supply a
+  custom compile-error message shown when no real counterpart matches.
+- **Why:** a DX-only feature with no runtime effect; deferred.
+- **Parity treatment:** not ported.
+
+## D14 — No whole-public-API reflection (`ApiMetadataCompanion`/`materializeForApi`/`@ignore`)
+
+- **mrpc:** `RpcMetadataCompanion`/`AsRaw.materialize`/`AsReal.materialize`
+  (`src/mrpc/meta/RpcMetadataCompanion.scala`) only ever reflect an RPC trait's
+  **abstract** methods, via `made.Done.Of`.
+- **commons:** `ApiMetadataCompanion[M[_]]`
+  (`meta/RpcMetadataCompanion.scala:23-25` per the AVSystem source) and
+  `AsRaw.materializeForApi`/`AsReal.materializeForApi`
+  (`rpc/AsRawReal.scala:32,64`) reflect a type's **entire public API**
+  (including concrete methods), with `@ignore` (`meta/metaAnnotations.scala:298-302`)
+  excluding specific methods from that reflection.
+- **Why:** out of scope — mrpc's metadata/dispatch model is RPC-trait-shaped
+  (abstract methods only) throughout.
+- **Parity treatment:** not ported.
+
+## D15 — No ADT/case-class metadata derivation
+
+- **mrpc:** `TypedMetadata`/`RpcMetadataCompanion` only describe RPC traits
+  (methods and their params). There is no metadata mechanism targeting case
+  classes or sealed hierarchies.
+- **commons:** a parallel, separately-named metadata family exists for ADTs:
+  `AdtMetadataCompanion`/`BoundedAdtMetadataCompanion`
+  (`meta/AdtMetadataCompanion.scala:16-37`), with steering annotations
+  `@adtParamMetadata` (case-class fields), `@adtCaseMetadata` (sealed-hierarchy
+  case types), `@adtCaseSealedParentMetadata` (intermediate sealed supertypes),
+  `@allowOptional`, and `@allowUnorderedSubtypes`
+  (`meta/metaAnnotations.scala:199-221,290-307`).
+- **Why:** out of scope — mrpc has never targeted ADT/serialization-shape
+  metadata, only RPC-trait metadata. This is a different feature axis than the
+  RPC arity work in D7, not a smaller version of it.
+- **Parity treatment:** not ported; not currently planned (no RPC use case
+  requires it yet).
+
+## D16 — Metadata reflection is missing flags/position/default-value/strictness controls
+
+- **mrpc:** `MetadataDerivation` supports `@composite`, `@reifyName`,
+  `@reifyAnnot` (single/optional/multi), `@infer`, `@rpcMethodMetadata`,
+  `@rpcParamMetadata` (`src/mrpc/derive/MetadataDerivation.scala`). There is no
+  way to reify a param's position, its by-name/repeated/has-default-value
+  flags, its Scala-level default value, the number of parameter lists, or a
+  plain "is this annotated with `T`" boolean; and there is no relaxation
+  control for the completeness/arity checks `MetadataDerivation` already
+  enforces (it always aborts on an arity mismatch — see
+  `test/mrpc/meta/MetadataCompileErrorSuite.scala`).
+- **commons:** `@reifyPosition`, `@reifyFlags`, `@reifyDefaultValue`,
+  `@reifyParamListCount`, `@isAnnotated[T]` reify exactly this information
+  (`meta/metaAnnotations.scala:244-280`); `@checked` makes an `@infer` implicit
+  search failure affect real/raw matching rather than surface as a plain
+  compile error, and `@allowIncomplete` relaxes the "every method/param must be
+  captured by some metadata param" requirement (`meta/metaAnnotations.scala:282-296`).
+- **Why:** v1's metadata steering vocabulary covers what the current test
+  fixtures (`MultiCollectionSuite`, `CompositeMetadataSuite`, `MetadataSuite`)
+  need; the richer reflective surface was deferred.
+- **Parity treatment:** not ported.
+
+## D17 — No `@auxiliary`/`@annotated`/`@notAnnotated` filters, no `Fallback[T]`/`MacroInstances`
+
+- **mrpc:** has no equivalent of:
+  - `@auxiliary` (`meta/metaAnnotations.scala:154-162`) — a raw param matching a
+    real param without consuming it, so the same real value can be duplicated
+    across multiple raw params with different encodings.
+  - `@annotated[A]`/`@notAnnotated[A]` (`meta/metaAnnotations.scala:139-152`) —
+    a lighter filter-only alternative to the tag hierarchy of D10.
+  - `Fallback[T]` (`meta/Fallback.scala:18`) — a wrapper that lowers an
+    `AsRaw`/`AsReal`/metadata implicit's priority below normal imports.
+  - `MacroInstances[Implicits, Instances]` (`meta/MacroInstances.scala:36-83`) —
+    bundles several macro-materialized typeclasses (e.g. `AsRaw`+`AsReal`+
+    metadata) behind one implicit constructor param.
+- **commons:** all four exist as described above.
+- **Why:** each is a standalone convenience/architecture feature with no
+  current mrpc use case; none block the v1 fire/call/get model.
+- **Parity treatment:** not ported.
