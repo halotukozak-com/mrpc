@@ -20,7 +20,7 @@
 // recursing through dotty.tools.dotc.transform.init.Semantic$$anon$1.traverse
 // on TypeAccumulator.foldOver). Re-enable once upstream fixes this, or once
 // derivation is scoped down enough for the checker to terminate.
-//> using options -Werror//  -Wunused:all
+//> using options -Werror -Wunused:all
 
 //> using options -Xmax-inlines 100
 ////> using options -Xprint-suspension
