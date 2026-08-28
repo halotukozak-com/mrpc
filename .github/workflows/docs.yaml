@@ -32,14 +32,16 @@ jobs:
       - name: Setup scala-cli
         uses: VirtusLab/scala-cli-setup@v1
       - name: Generate documentation
+        env:
+          REPO_NAME: ${{ github.event.repository.name }}
         run: |
           scala-cli --power doc . -- \
-          -project "mrpc" \
+          -project "$REPO_NAME" \
           -project-version ${{ github.ref_name }} \
           -project-footer "made with ❤️ and coffee" \
-          -social-links:github::https://github.com/halotukozak/mrpc \
+          -social-links:github::https://github.com/halotukozak/$REPO_NAME \
           -snippet-compiler:compile \
-          -source-links:"src=github://halotukozak/mrpc?tag=${{ github.ref_name }}" \
+          -source-links:"src=github://halotukozak/$REPO_NAME?tag=${{ github.ref_name }}" \
           -revision:${{ github.ref_name }}
       - name: Inject Umami analytics
         run: |
