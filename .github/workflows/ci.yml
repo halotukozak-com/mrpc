@@ -7,22 +7,47 @@ on:
     branches: [ main ]
 
 jobs:
-  build:
-    name: Build and test
+  lint:
+    name: Scalafmt
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-
       - name: Setup coursier cache
         uses: coursier/cache-action@v8.1
-
       - uses: VirtusLab/scala-cli-setup@v1
-
       - name: Check formatting
         run: scala-cli --power fmt --check .
 
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Setup coursier cache
+        uses: coursier/cache-action@v8.1
+      - name: Cache scala-cli/Bloop incremental build
+        uses: actions/cache@v6
+        with:
+          path: .scala-build
+          key: scala-build-jvm-${{ hashFiles('project.scala', '**/*.scala') }}
+          restore-keys: |
+            scala-build-jvm-
+      - uses: VirtusLab/scala-cli-setup@v1
       - name: Run tests
-        run: scala-cli --power test .
+        # Coverage is recorded only for production sources; tests were previously
+        # measured as 100%-covered and inflated the reported number.
+        run: scala-cli --power test . -O -coverage-out:./.scoverage -O '-coverage-exclude-files:.*test/.*'
+      - name: Generate coverage
+        run: scala-cli .scoverage/report.sc
+      - uses: codecov/codecov-action@v7
+        with:
+          fail_ci_if_error: false
+          files: .scoverage/report/cobertura.xml
+          token: ${{ secrets.CODECOV_TOKEN }}
+      - name: Test documentation
+        run: scala-cli --power doc .
 
   compile:
     name: Compile (${{ matrix.platform }})
@@ -41,12 +66,19 @@ jobs:
       - uses: actions/checkout@v7
       - name: Setup coursier cache
         uses: coursier/cache-action@v8.1
+      - name: Cache scala-cli/Bloop incremental build
+        uses: actions/cache@v6
+        with:
+          path: .scala-build
+          key: scala-build-${{ matrix.platform }}-${{ hashFiles('project.scala', '**/*.scala') }}
+          restore-keys: |
+            scala-build-${{ matrix.platform }}-
       - uses: VirtusLab/scala-cli-setup@v1
       - name: Compile
         run: scala-cli --power compile . --platform ${{ matrix.platform }} ${{ matrix.args }}
 
-  # JVM is covered by the `build` job above; this just runs the same suite on
-  # the other targets to catch platform-specific regressions.
+  # JVM is covered by the `test` job above (with coverage/docs); this just runs
+  # the same suite on the other targets to catch platform-specific regressions.
   test-cross-platform:
     name: Test (${{ matrix.platform }})
     runs-on: ubuntu-latest
@@ -62,6 +94,13 @@ jobs:
       - uses: actions/checkout@v7
       - name: Setup coursier cache
         uses: coursier/cache-action@v8.1
+      - name: Cache scala-cli/Bloop incremental build
+        uses: actions/cache@v6
+        with:
+          path: .scala-build
+          key: scala-build-${{ matrix.platform }}-${{ hashFiles('project.scala', '**/*.scala') }}
+          restore-keys: |
+            scala-build-${{ matrix.platform }}-
       - uses: VirtusLab/scala-cli-setup@v1
       - name: Run tests
         run: scala-cli --power test . --platform ${{ matrix.platform }} ${{ matrix.args }}

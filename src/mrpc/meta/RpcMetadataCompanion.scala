@@ -29,3 +29,6 @@ trait RpcMetadataCompanion[M[_]]:
   inline def materialize[Real: {Done.Of as done}](using made: Made.Of[M[Real]]): M[Real] =
     halotukozak.mrpc.derive.MetadataDerivation
       .impl[M, Real, done.Operations](done.operations, RpcNames.materialize[Real])(using containsOnly.refl)
+
+  /** Lowest priority so a `Fallback[M[Real]]` never out-competes a normal `given M[Real]`. Mirrors commons `MetadataCompanion.fromFallback`. */
+  given fromFallback[Real](using fallback: halotukozak.mrpc.Fallback[M[Real]]): M[Real] = fallback.value

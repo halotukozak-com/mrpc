@@ -1,5 +1,7 @@
 package halotukozak.mrpc.conv
 
+import halotukozak.mrpc.Fallback
+
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.Try
 
@@ -7,7 +9,7 @@ import scala.util.Try
 trait AsReal[Raw, Real]:
   def asReal(raw: Raw): Real
 
-object AsReal:
+object AsReal extends AsRealLowPrio:
   def apply[Raw, Real](using instance: AsReal[Raw, Real]): AsReal[Raw, Real] = instance
 
   given identity[A]: AsReal[A, A] = (a: A) => a
@@ -32,3 +34,7 @@ object AsReal:
   def makeLazy[Raw, Real](conv: => AsReal[Raw, Real]): AsReal[Raw, Real] = new AsReal[Raw, Real]:
     private lazy val c = conv
     def asReal(raw: Raw): Real = c.asReal(raw)
+
+/** Lowest-priority instances, so a `Fallback[AsReal[Raw, Real]]` never out-competes a normal given. */
+private[conv] trait AsRealLowPrio:
+  given fromFallback[Raw, Real](using fallback: Fallback[AsReal[Raw, Real]]): AsReal[Raw, Real] = fallback.value

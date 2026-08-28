@@ -18,9 +18,14 @@ object AsRawReal extends AsRawRealLowPrio:
     def asReal(raw: A): A = raw
 
 /** Low-priority instances so `fromSeparate` does not collide with `identity` when `Raw = Real`. */
-private[conv] trait AsRawRealLowPrio:
+private[conv] trait AsRawRealLowPrio extends AsRawRealLowestPrio:
   given fromSeparate[Raw, Real](
     using
     asRaw: AsRaw[Raw, Real],
     asReal: AsReal[Raw, Real],
   ): AsRawReal[Raw, Real] = AsRawReal.create(asRaw.asRaw, asReal.asReal)
+
+/** Lowest-priority instance, below `fromSeparate` too — `Fallback` is meant as a last resort. */
+private[conv] trait AsRawRealLowestPrio:
+  given fromFallback[Raw, Real](using fallback: halotukozak.mrpc.Fallback[AsRawReal[Raw, Real]]): AsRawReal[Raw, Real] =
+    fallback.value
