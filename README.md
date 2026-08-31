@@ -3,7 +3,7 @@
 **AVSystem/commons-style RPC framework for Scala 3**, built on [Made](https://github.com/halotukozak/made) and
 [mcodec](https://github.com/halotukozak/mcodec).
 
-> **Experimental / v1 in progress.** Pinned to Scala **3.9.0-RC4**. JVM only. The wire model is fixed to a
+> **Experimental / v1 in progress.** Pinned to Scala **3.9.0**. JVM only. The wire model is fixed to a
 > `fire`/`call`/`get` `RawRpc` — generic methods, varargs, `@composite`, and interceptors are out of scope for now.
 > See [DIVERGENCES.md](DIVERGENCES.md) for the full, honest list of where mrpc deliberately departs from commons.
 
@@ -40,7 +40,7 @@ back into typed calls.
 ### sbt
 
 ```scala
-scalaVersion := "3.9.0-RC4"
+scalaVersion := "3.9.0"
 libraryDependencies += "com.halotukozak" %% "mrpc" % "<version>"
 ```
 
@@ -48,7 +48,7 @@ libraryDependencies += "com.halotukozak" %% "mrpc" % "<version>"
 
 ```scala
 def scalaVersion = "3.9.0-RC4"
-def mvDeps = Seq(mvn"com.halotukozak::mrpc::<version>")
+def mvnDeps = Seq(mvn"com.halotukozak::mrpc::<version>")
 ```
 
 ## Quickstart
