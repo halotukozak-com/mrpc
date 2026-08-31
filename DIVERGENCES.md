@@ -240,13 +240,12 @@ divergence rather than pretend the two models are identical.
 
 - **mrpc:** `MetadataDerivation` supports `@composite`, `@reifyName`,
   `@reifyAnnot` (single/optional/multi), `@infer`, `@rpcMethodMetadata`,
-  `@rpcParamMetadata` (`src/mrpc/derive/MetadataDerivation.scala`). There is no
-  way to reify a param's position, its by-name/repeated/has-default-value
-  flags, its Scala-level default value, the number of parameter lists, or a
-  plain "is this annotated with `T`" boolean; and there is no relaxation
-  control for the completeness/arity checks `MetadataDerivation` already
-  enforces (it always aborts on an arity mismatch — see
-  `test/mrpc/meta/MetadataCompileErrorSuite.scala`).
+  `@rpcParamMetadata`, **and (2026-08-08) `@isAnnotated[A]` / `@reifyParamListCount`**
+  (`src/mrpc/derive/MetadataDerivation.scala`). There is still no way to reify
+  a param's position, its by-name/repeated/has-default-value flags, or its
+  Scala-level default value; and there is still no relaxation control for the
+  completeness/arity checks `MetadataDerivation` already enforces (it always
+  aborts on an arity mismatch — see `test/mrpc/meta/MetadataCompileErrorSuite.scala`).
 - **commons:** `@reifyPosition`, `@reifyFlags`, `@reifyDefaultValue`,
   `@reifyParamListCount`, `@isAnnotated[T]` reify exactly this information
   (`meta/metaAnnotations.scala:244-280`); `@checked` makes an `@infer` implicit
@@ -256,7 +255,12 @@ divergence rather than pretend the two models are identical.
 - **Why:** v1's metadata steering vocabulary covers what the current test
   fixtures (`MultiCollectionSuite`, `CompositeMetadataSuite`, `MetadataSuite`)
   need; the richer reflective surface was deferred.
-- **Parity treatment:** not ported.
+- **Parity treatment:** `@isAnnotated[A]` (plain presence check, method/param
+  level only) and `@reifyParamListCount` (method level only, via
+  `Tuple.Size[op.ParamLists]`) are implemented and covered by
+  `test/mrpc/meta/IsAnnotatedAndParamListCountSuite.scala`. `@reifyPosition`,
+  `@reifyFlags`, `@reifyDefaultValue`, `@checked`, `@allowIncomplete` remain
+  not ported.
 
 ## D17 — No `@auxiliary`/`@annotated`/`@notAnnotated` filters, no `Fallback[T]`/`MacroInstances`
 

@@ -35,3 +35,12 @@ private[mrpc] object reifyName:
  * [[scala.annotation.StaticAnnotation]]. Mirrors commons `reifyAnnot`.
  */
 final class reifyAnnot extends MetaAnnotation
+
+/**
+ * Steers a `Boolean` metadata param to hold whether the RPC element carries an annotation of type `A`
+ * — a plain yes/no, unlike `@reifyAnnot`'s single/optional/multi extraction. Mirrors commons `isAnnotated[A]`.
+ */
+final class isAnnotated[A] extends MetaAnnotation
+
+/** Steers an `Int` metadata param to hold the current method's parameter-list count. Method-level only. */
+final class reifyParamListCount extends MetaAnnotation
