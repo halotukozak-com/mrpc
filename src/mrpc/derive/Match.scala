@@ -17,7 +17,7 @@ def matchFromImpl[Names <: Tuple: Type, Values <: Tuple: Type, R: Type](
   args: Expr[NamedTuple.NamedTuple[Names, Values]],
   reject: Expr[R],
 )(using Quotes,
-): Expr[R] =
+): Expr[R] = {
   import quotes.reflect.*
 
   val caseDefs = TupleTraverse.traverseTuple[Names, String].zipWithIndex.map { (name, index) =>
@@ -25,3 +25,4 @@ def matchFromImpl[Names <: Tuple: Type, Values <: Tuple: Type, R: Type](
   }
   val default = CaseDef(Wildcard(), None, reject.asTerm)
   Match('{ $scrutinee: @switch }.asTerm, caseDefs :+ default).asExprOf[R]
+}

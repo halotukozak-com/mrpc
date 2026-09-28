@@ -48,7 +48,7 @@ private[mrpc] object MetadataDerivation:
       type Ops <: Tuple /* of DoneOperation */
       type Names <: Tuple /* of String */
 
-      given Ops containsOnly halotukozak.made.DoneOperation = compiletime.deferred
+      given Ops containsOnly DoneOperation = compiletime.deferred
       given Names containsOnly String = compiletime.deferred
 
       def operations: Ops
@@ -108,17 +108,18 @@ private[mrpc] object MetadataDerivation:
     p.fromTuple(elems)
 
   inline private def fillAllParams(elems: Tuple)(using Context)(using elems.type containsOnly MadeElem): Tuple =
-    inline elems match
+    inline elems match {
       case _: EmptyTuple => EmptyTuple
       case _: (head *: tail) =>
         val head = elems.head.asInstanceOf[head & MadeElem]
         val tail = elems.tail.asInstanceOf[tail & Tuple.Tail[elems.type]]
 
         realCons(fillParam(head), fillAllParams(tail))
+    }
 
   extension (e: MadeElem) transparent inline private def getUserRawName: Boolean = ${ getUserRawNameImpl[e.Metadata] }
 
-  private def getUserRawNameImpl[M <: Tuple: Type](using quotes: Quotes): Expr[Boolean] =
+  private def getUserRawNameImpl[M <: Tuple: Type](using quotes: Quotes): Expr[Boolean] = {
     import quotes.reflect.*
 
     def loop[Tup <: Tuple: Type](using Quotes): Expr[Boolean] = Type.of[Tup] match
@@ -131,6 +132,7 @@ private[mrpc] object MetadataDerivation:
               case Expr(x) => Expr(x.useRawName)
 
     loop[M]
+  }
 
   transparent inline private def arity(e: MadeElem): SlotArity =
     inline if e.hasAnnotation[halotukozak.mrpc.annotation.multi] then SlotArity.Multi
@@ -236,13 +238,14 @@ private[mrpc] object MetadataDerivation:
         )
 
   inline private def buildAllParamElems[e](params: Tuple)(using params.type containsOnly InputElem): Tuple =
-    inline params match
+    inline params match {
       case _: EmptyTuple => EmptyTuple
       case _: (head *: tail) =>
         val head = params.head.asInstanceOf[head & InputElem]
         val tail = params.tail.asInstanceOf[tail & Tuple.Tail[params.type]]
 
         realCons(buildElem[e, head.Type](using Context.Param(head)), buildAllParamElems[e](tail))
+    }
 
   inline private def buildElem[elem <: AnyKind, T](using ctx: Context) = ${ buildElemImpl[elem, T]('ctx) }
 
