@@ -65,7 +65,7 @@ object Handler:
       val tail = tup.tail.asInstanceOf[tail]
       scala.compiletime.summonInline[AsRaw[Raw, head]].asRaw(head) :: encodeArgs[Raw](tail)
 
-  private def splitBySizes[A](items: List[A], sizes: List[Int]): List[List[A]] =
+  private def splitBySizes[A](items: List[A], sizes: List[Int]): List[List[A]] = {
     @tailrec def loop(sizes: List[Int], remaining: List[A], acc: Vector[List[A]]): Vector[List[A]] = sizes match
       case Nil => acc
       case n :: next =>
@@ -73,3 +73,4 @@ object Handler:
         loop(next, rest, acc :+ group)
 
     loop(sizes, items, Vector.empty).toList
+  }
