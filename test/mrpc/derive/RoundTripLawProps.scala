@@ -19,7 +19,6 @@ import scala.concurrent.{ExecutionContext, Future}
 class RoundTripLawProps extends munit.ScalaCheckSuite:
 
   // Leaf JSON codec givens + parasitic EC must be in scope where both directions materialize.
-  import halotukozak.mrpc.codec.JsonRawValue.given
   given ExecutionContext = ExecutionContext.parasitic
 
   // Arbitrary[User] copied from LeafCodecProps: alphaNum names keep the JSON leaf encoding away from

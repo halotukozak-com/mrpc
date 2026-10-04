@@ -9,7 +9,7 @@ import halotukozak.mrpc.annotation.*
 import scala.compiletime.ops.int.{+, >}
 import scala.quoted.*
 import scala.Tuple.Tail
-import scala.annotation.tailrec
+import scala.annotation.{publicInBinary, tailrec}
 
 object RpcNames:
   transparent inline private def buildBases(
@@ -50,13 +50,13 @@ object RpcNames:
               case Expr(x) => Some(x)
           case _ => loop[ts, Annot]
 
-  private def getRpcNameImpl[M <: Tuple: Type](using Quotes): Expr[String | Null] =
+  @publicInBinary private[derive] def getRpcNameImpl[M <: Tuple: Type](using Quotes): Expr[String | Null] =
     Expr(loop[M, halotukozak.mrpc.annotation.rpcName].map(_.name).orNull)
 
-  private def getOverloadedOnlyImpl[M <: Tuple: Type](using Quotes): Expr[Boolean | Null] =
+  @publicInBinary private[derive] def getOverloadedOnlyImpl[M <: Tuple: Type](using Quotes): Expr[Boolean | Null] =
     Expr(loop[M, halotukozak.mrpc.annotation.rpcNamePrefix].map(_.overloadedOnly).orNull)
 
-  private def getPrefixImpl[M <: Tuple: Type](using Quotes): Expr[String | Null] =
+  @publicInBinary private[derive] def getPrefixImpl[M <: Tuple: Type](using Quotes): Expr[String | Null] =
     Expr(loop[M, halotukozak.mrpc.annotation.rpcNamePrefix].map(_.prefix).orNull)
 
   /**
@@ -137,7 +137,7 @@ object RpcNames:
   transparent inline def materialize[T: Done.Of as done]: Tuple =
     buildRpcNames(buildBases(done.operations))(using done, containsOnly.refl)
 
-  private def overloadedSuffixImpl[Elems <: Tuple: Type](using Quotes): Expr[String] =
+  @publicInBinary private[derive] def overloadedSuffixImpl[Elems <: Tuple: Type](using Quotes): Expr[String] =
     val sig = TupleTraverse
       .traverseTuple[Elems, InputElem]
       .map:

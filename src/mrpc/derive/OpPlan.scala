@@ -4,6 +4,7 @@ package derive
 import halotukozak.commons.{containsOnly, realCons, Of}
 import halotukozak.made.*
 
+import scala.annotation.publicInBinary
 import scala.concurrent.Future
 import scala.quoted.{Expr, Quotes, Type}
 
@@ -14,7 +15,7 @@ import scala.quoted.{Expr, Quotes, Type}
  * matches, no separate value-level enum to keep in sync with it.
  */
 private[derive] sealed class ArityTag
-private[derive] object ArityTag:
+@publicInBinary private[derive] object ArityTag:
   object Fire extends ArityTag
   final class Call[Result] extends ArityTag
   final class Get[Sub] extends ArityTag
@@ -23,17 +24,19 @@ private[derive] object ArityTag:
 private[derive] enum EncodingTag:
   case Encoded, Verbatim
 
+@publicInBinary private[derive] object EncodingTag
+
 private[derive] sealed trait ParamPlan:
   type Label <: String
   type ParamType
   type Encoding <: EncodingTag
 
 object ParamPlan:
-  private val reusable = new ParamPlan {}
+  @publicInBinary private[derive] val reusable = new ParamPlan {}
 
   inline private def isRawCarrier[T]: Boolean = ${ isRawCarrierImpl[T] }
 
-  private def isRawCarrierImpl[T: Type](using quotes: Quotes): Expr[Boolean] =
+  @publicInBinary private[derive] def isRawCarrierImpl[T: Type](using quotes: Quotes): Expr[Boolean] =
     import quotes.reflect.*
     // An abstract type member / type parameter (no concrete dealias) is the only thing that could be
     // the engine's `Raw`. Concrete leaf types (Int, String, User, ...) are always encoded. Whether a
@@ -78,7 +81,7 @@ private[derive] sealed trait OpPlan:
 
 object OpPlan:
 
-  private val reusable = new OpPlan {}
+  @publicInBinary private[derive] val reusable = new OpPlan {}
 
   transparent inline private def arityOf[Output]: ArityTag = inline compiletime.erasedValue[Output] match
     case _: Unit => ArityTag.Fire
