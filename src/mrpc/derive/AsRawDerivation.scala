@@ -6,6 +6,7 @@ import halotukozak.made.{Done, DoneOperation}
 import halotukozak.mrpc.conv.{AsRaw, AsReal}
 import halotukozak.mrpc.raw.{RawInvocation, RawRpc}
 
+import scala.annotation.publicInBinary
 import scala.concurrent.{ExecutionContext, Future}
 
 /**
@@ -26,21 +27,21 @@ object AsRawDerivation:
       buildRawRpc[Raw, Real, plans.type](api)
 
   /** Assembles the dispatching `RawRpc[Raw]`; `Done.Of[Real]` is summoned once and shared across `fire`/`call`/`get`. */
-  inline def buildRawRpc[Raw, Real: {Done.Of as done}, Plans <: Tuple: Of[OpPlan]](api: Real)(using ExecutionContext)
+  inline def buildRawRpc[Raw, Real: {Done.Of as done}, OpPlans <: Tuple: Of[OpPlan]](api: Real)(using ExecutionContext)
     : RawRpc[Raw] =
     type Names = Tuple.Map[
-      Plans,
+      OpPlans,
       [op] =>> op match
         case ([n] =>> OpPlan { type RpcName = n })[name] => name,
     ]
     mkRawRpc[Raw](
-      fireBody[Raw, Real, Plans, Names](api),
-      callBody[Raw, Real, Plans, Names](api),
-      getBody[Raw, Real, Plans, Names](api),
+      fireBody[Raw, Real, OpPlans, Names](api),
+      callBody[Raw, Real, OpPlans, Names](api),
+      getBody[Raw, Real, OpPlans, Names](api),
     )
 
   /** Not `inline` — an anonymous class defined directly inside an inline body would recompile at every call site. */
-  private def mkRawRpc[Raw](
+  @publicInBinary private[derive] def mkRawRpc[Raw](
     fireFn: RawInvocation[Raw] => Unit,
     callFn: RawInvocation[Raw] => Future[Raw],
     getFn: RawInvocation[Raw] => RawRpc[Raw],
@@ -84,11 +85,11 @@ object AsRawDerivation:
               case _ => (inv: RawInvocation[Raw]) => reject(inv)
         realCons(arm, fireArms[Raw, Real, tail](api)(index + 1))
 
-  inline private def fireBody[Raw, Real, Plans <: Tuple, Names <: Tuple](
+  inline private def fireBody[Raw, Real, OpPlans <: Tuple, Names <: Tuple](
     api: Real,
   )(
     inv: RawInvocation[Raw],
-  ): Unit = matchFrom(NamedTuple.build[Names]()(fireArms[Raw, Real, Plans](api)(0)))[RawInvocation[Raw] => Unit](
+  ): Unit = matchFrom(NamedTuple.build[Names]()(fireArms[Raw, Real, OpPlans](api)(0)))[RawInvocation[Raw] => Unit](
     inv.rpcName,
     reject,
   )(inv)
@@ -112,13 +113,13 @@ object AsRawDerivation:
               case _ => (inv: RawInvocation[Raw]) => reject(inv)
         realCons(arm, callArms[Raw, Real, tail](api)(index + 1))
 
-  inline private def callBody[Raw, Real, Plans <: Tuple, Names <: Tuple](
+  inline private def callBody[Raw, Real, OpPlans <: Tuple, Names <: Tuple](
     api: Real,
   )(
     inv: RawInvocation[Raw],
   )(using ExecutionContext,
   ): Future[Raw] = matchFrom(
-    NamedTuple.build[Names]()(callArms[Raw, Real, Plans](api)(0)),
+    NamedTuple.build[Names]()(callArms[Raw, Real, OpPlans](api)(0)),
   )[RawInvocation[Raw] => Future[Raw]](inv.rpcName, reject)(inv)
 
   transparent inline private def bodyArms[Raw, Real: Done.Of, Acc <: Tuple](
@@ -140,13 +141,13 @@ object AsRawDerivation:
               case _ => (inv: RawInvocation[Raw]) => reject(inv)
         realCons(arm, bodyArms[Raw, Real, tail](api)(index + 1))
 
-  inline private def getBody[Raw, Real, Plans <: Tuple, Names <: Tuple](
+  inline private def getBody[Raw, Real, OpPlans <: Tuple, Names <: Tuple](
     api: Real,
   )(
     inv: RawInvocation[Raw],
   ): RawRpc[Raw] =
     matchFrom(
-      NamedTuple.build[Names]()(bodyArms[Raw, Real, Plans](api)(0)),
+      NamedTuple.build[Names]()(bodyArms[Raw, Real, OpPlans](api)(0)),
     )[RawInvocation[Raw] => RawRpc[Raw]](inv.rpcName, reject)(inv)
 
   // --- shared helpers ---
@@ -169,5 +170,5 @@ object AsRawDerivation:
           decodedArgs[Raw, tail](flatArgs)(i + 1),
         )
 
-  private def reject(inv: RawInvocation[?]): Nothing =
+  @publicInBinary private[derive] def reject(inv: RawInvocation[?]): Nothing =
     throw new IllegalArgumentException("unknown rpc name: " + inv.rpcName)
