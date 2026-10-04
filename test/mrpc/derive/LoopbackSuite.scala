@@ -17,7 +17,6 @@ class LoopbackSuite extends munit.FunSuite:
 
   // The leaf JSON codec givens and a parasitic ExecutionContext must be in scope where both
   // directions are materialized (the abstract-Raw summon proof established this placement).
-  import halotukozak.mrpc.codec.JsonRawValue.given
   given ExecutionContext = ExecutionContext.parasitic
 
   private var pinged: Boolean = false
