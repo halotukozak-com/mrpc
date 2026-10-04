@@ -39,4 +39,4 @@ class MatchSuite extends munit.FunSuite:
   test("matchFrom's result type is the union of the named tuple's value types"):
     val args = (foo = 1, bar = "two")
     val result: Int | String = matchFrom(args)[Int | String]("foo", reject = "fallback")
-    assertEquals(result, 1)
+    assertEquals[Any, Any](result, 1)

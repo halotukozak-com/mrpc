@@ -4,7 +4,7 @@ package derive
 import halotukozak.commons.*
 import halotukozak.made.*
 
-import scala.annotation.Annotation
+import scala.annotation.{publicInBinary, Annotation}
 import scala.quoted.{Expr, Quotes, Type}
 
 /**
@@ -32,7 +32,7 @@ import scala.quoted.{Expr, Quotes, Type}
  * Resolved rpcNames come from [[RpcNames]] and the op set from `Done.Of[Real]` — the same engine
  * introspection the dispatcher uses, so metadata cannot drift from what the engine dispatches.
  */
-private[mrpc] object MetadataDerivation:
+@publicInBinary private[mrpc] object MetadataDerivation:
 
   /**
    * The real-symbol context a metadata value is being built against. Determines what `@reifyName`,
@@ -41,8 +41,8 @@ private[mrpc] object MetadataDerivation:
 
   transparent inline private def ctx(using ctx: Context): ctx.type = ctx
 
-  private sealed trait Context
-  private object Context:
+  private[derive] sealed trait Context
+  @publicInBinary private[derive] object Context:
     /** The whole real trait: ops + their resolved names, in `Done` order. */
     sealed trait Trait extends Context:
       type Ops <: Tuple /* of DoneOperation */
@@ -119,7 +119,7 @@ private[mrpc] object MetadataDerivation:
 
   extension (e: MadeElem) transparent inline private def getUserRawName: Boolean = ${ getUserRawNameImpl[e.Metadata] }
 
-  private def getUserRawNameImpl[M <: Tuple: Type](using quotes: Quotes): Expr[Boolean] = {
+  @publicInBinary private[derive] def getUserRawNameImpl[M <: Tuple: Type](using quotes: Quotes): Expr[Boolean] = {
     import quotes.reflect.*
 
     def loop[Tup <: Tuple: Type](using Quotes): Expr[Boolean] = Type.of[Tup] match
@@ -160,8 +160,8 @@ private[mrpc] object MetadataDerivation:
    * The collection-arity marker on a metadata param. `@multi` -> a collection slot; `@optional` ->
    * an `Option` slot; absent (or `@single`) -> exactly-one. Mirrors commons `single`/`optional`/`multi`.
    */
-  private sealed trait SlotArity
-  private object SlotArity:
+  private[derive] sealed trait SlotArity
+  @publicInBinary private[derive] object SlotArity:
     sealed trait Single extends SlotArity
     object Single extends Single
     sealed trait Optional extends SlotArity
@@ -249,7 +249,7 @@ private[mrpc] object MetadataDerivation:
 
   inline private def buildElem[elem <: AnyKind, T](using ctx: Context) = ${ buildElemImpl[elem, T]('ctx) }
 
-  private def buildElemImpl[elem <: AnyKind: Type, T: Type](
+  @publicInBinary private[derive] def buildElemImpl[elem <: AnyKind: Type, T: Type](
     ctx: Expr[Context],
   )(using Quotes,
   ): Expr[?] = Type.of[elem] match

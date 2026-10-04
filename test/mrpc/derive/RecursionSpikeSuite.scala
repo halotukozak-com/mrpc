@@ -5,7 +5,7 @@ import scala.concurrent.{ExecutionContext, Future}
 import halotukozak.mcodec.Json
 
 import halotukozak.mrpc.derive.SampleApi.*
-import halotukozak.mrpc.derive.SampleApi.SampleApiCodec.{pingRaw, pingReal, pongRaw, pongReal, selfRaw, selfReal}
+import halotukozak.mrpc.derive.SampleApi.SampleApiCodec.{pingRaw, pingReal, selfRaw, selfReal}
 import halotukozak.mrpc.raw.RawRpc
 
 /**
@@ -29,7 +29,6 @@ import halotukozak.mrpc.raw.RawRpc
 class RecursionSpikeSuite extends munit.FunSuite:
 
   // Leaf JSON codec givens + parasitic EC must be in scope where both directions are materialized.
-  import halotukozak.mrpc.codec.JsonRawValue.given
   given ExecutionContext = ExecutionContext.parasitic
 
   private def await[A](f: Future[A]): A = f.value.get.get

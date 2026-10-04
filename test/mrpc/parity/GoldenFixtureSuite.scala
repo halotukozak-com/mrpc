@@ -100,7 +100,7 @@ class GoldenFixtureSuite extends munit.FunSuite:
   override def beforeEach(context: BeforeEach): Unit = captured.clear()
 
   test("call_add: add(2, 40) emits the call_add fixture byte-for-byte"):
-    proxy.add(2, 40)
+    proxy.add(2, 40): Unit // only the emitted invocation is checked, not the reply
     assertEquals(render(lastEmitted), fixture("call_add"))
 
   test("fire_ping: ping(7) emits the fire_ping fixture byte-for-byte"):

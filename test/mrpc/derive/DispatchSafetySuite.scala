@@ -1,7 +1,5 @@
 package halotukozak.mrpc.derive
 
-import halotukozak.made.Done
-
 import scala.concurrent.{ExecutionContext, Future}
 import halotukozak.mcodec.Json
 import halotukozak.mrpc.derive.SampleApi.*
@@ -17,7 +15,6 @@ class DispatchSafetySuite extends munit.FunSuite:
 
   // The leaf JSON codec givens and a parasitic ExecutionContext must be in scope where the server
   // adapter is materialized (the abstract-Raw summon proof established this placement).
-  import halotukozak.mrpc.codec.JsonRawValue.given
   given ExecutionContext = ExecutionContext.parasitic
 
   // A concrete real implementation the server adapter dispatches against.

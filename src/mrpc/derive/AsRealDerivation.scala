@@ -30,9 +30,9 @@ object AsRealDerivation:
         .materializeTo[Real](using done)(using ValidHandlers.refl)
 
   // todo
-  transparent inline private def buildAllHandlers[Raw: RawRpc, Plans <: Tuple: Of[OpPlan]](using ExecutionContext)
+  transparent inline private def buildAllHandlers[Raw: RawRpc, OpPlans <: Tuple: Of[OpPlan]](using ExecutionContext)
     : Tuple =
-    inline compiletime.erasedValue[Plans] match
+    inline compiletime.erasedValue[OpPlans] match
       case _: EmptyTuple => EmptyTuple
       case _: (head *: tail) =>
-        realCons(Handler.materialize[Raw, head & OpPlan], buildAllHandlers[Raw, tail & Tuple.Tail[Plans]])
+        realCons(Handler.materialize[Raw, head & OpPlan], buildAllHandlers[Raw, tail & Tuple.Tail[OpPlans]])
