@@ -10,22 +10,24 @@
 
 //> using options -deprecation -feature -new-syntax -unchecked
 //> using options -language:noAutoTupling
-//> using options -Vprofile -Xprint-inline
-//> using options -Ycheck:macros -Ydebug-flags -Ydebug-missing-refs
+//> using options -Ycheck:macros
 //> using options -Ycheck:all
-//> using options -Yexplain-lowlevel -Yexplicit-nulls
-//> using options -Yshow-suppressed-errors -Yshow-var-bounds
+//> using options -Yexplicit-nulls
 // -Wsafe-init is disabled: the checker never terminates on this codebase's
 // inline-derivation-heavy code (confirmed via thread dump stuck for 10+ min
 // recursing through dotty.tools.dotc.transform.init.Semantic$$anon$1.traverse
 // on TypeAccumulator.foldOver). Re-enable once upstream fixes this, or once
 // derivation is scoped down enough for the checker to terminate.
-//> using options -Werror -Wunused:all
+//> using options -Werror
 
 //> using options -Xmax-inlines 100
 ////> using options -Xprint-suspension
 
-//> using options -Yprofile-enabled -Yprofile-trace:debug.json
+// -Wall's warnings, minus -Wsafe-init (see above), are added in CI only: shared ci.yml in halotukozak-com/.github
+// compiler debugging flags, to switch back on while chasing a compiler problem:
+////> using options -Vprofile -Xprint-inline -Ydebug-flags -Ydebug-missing-refs
+////> using options -Yexplain-lowlevel -Yshow-suppressed-errors -Yshow-var-bounds
+////> using options -Yprofile-enabled -Yprofile-trace:debug.json
 //> using publish.organization com.halotukozak
 //> using publish.name mrpc
 //> using publish.computeVersion git:tag
