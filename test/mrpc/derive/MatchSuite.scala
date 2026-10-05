@@ -13,9 +13,9 @@ class MatchSuite extends munit.FunSuite, UnionSafeCompare:
 
   test("matchFrom dispatches to the value whose name matches the scrutinee"):
     val args = (foo = 1, bar = "two", baz = true)
-    assertEquals(matchFrom(args)[Any]("foo", reject = -1), 1)
-    assertEquals(matchFrom(args)[Any]("bar", reject = "reject"), "two")
-    assertEquals(matchFrom(args)[Any]("baz", reject = false), true)
+    assertEquals(matchFrom(args)[Int | String | Boolean]("foo", reject = -1), 1)
+    assertEquals(matchFrom(args)[Int | String | Boolean]("bar", reject = "reject"), "two")
+    assertEquals(matchFrom(args)[Int | String | Boolean]("baz", reject = false), true)
 
   test("matchFrom falls back to reject when the scrutinee names none of the fields"):
     val args = (foo = 1, bar = "two")
