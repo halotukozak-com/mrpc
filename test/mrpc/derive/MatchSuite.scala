@@ -1,5 +1,7 @@
 package halotukozak.mrpc.derive
 
+import halotukozak.mrpc.UnionSafeCompare
+
 /**
  * `matchFrom` compiles a runtime string dispatch directly off a `NamedTuple`'s field names: one
  * `case` per name, each returning the correspondingly-indexed value, with `reject` as the fallback
@@ -7,7 +9,7 @@ package halotukozak.mrpc.derive
  * over an op's resolved rpcNames, exercised here directly against `matchFrom` without any
  * `DoneOperation`/`OpPlan` machinery.
  */
-class MatchSuite extends munit.FunSuite:
+class MatchSuite extends munit.FunSuite, UnionSafeCompare:
 
   test("matchFrom dispatches to the value whose name matches the scrutinee"):
     val args = (foo = 1, bar = "two", baz = true)
@@ -39,4 +41,4 @@ class MatchSuite extends munit.FunSuite:
   test("matchFrom's result type is the union of the named tuple's value types"):
     val args = (foo = 1, bar = "two")
     val result: Int | String = matchFrom(args)[Int | String]("foo", reject = "fallback")
-    assertEquals[Any, Any](result, 1)
+    assertEquals(result, 1)
