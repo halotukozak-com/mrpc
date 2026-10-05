@@ -81,7 +81,7 @@ object AsRawDerivation:
           case op =>
             inline compiletime.erasedValue[op.ArityInfo] match
               case ArityTag.Fire =>
-                (inv: RawInvocation[Raw]) => invoke[Raw, Real, Any, op.type, op.Args](api, inv, index): Unit
+                (inv: RawInvocation[Raw]) => invoke[Raw, Real, Any, op.type, op.Args](api, inv, index)
               case _ => (inv: RawInvocation[Raw]) => reject(inv)
         realCons(arm, fireArms[Raw, Real, tail](api)(index + 1))
 
