@@ -33,7 +33,7 @@ back into typed calls.
 ### scala-cli
 
 ```scala
-//> using scala 3.9.0-RC4
+//> using scala 3.9.0
 //> using dep com.halotukozak::mrpc::<version>
 ```
 
@@ -47,7 +47,7 @@ libraryDependencies += "com.halotukozak" %% "mrpc" % "<version>"
 ### mill
 
 ```scala
-def scalaVersion = "3.9.0-RC4"
+def scalaVersion = "3.9.0"
 def mvnDeps = Seq(mvn"com.halotukozak::mrpc::<version>")
 ```
 
