@@ -33,7 +33,7 @@
 //> using publish.computeVersion git:tag
 //> using publish.description "mrpc - AVSystem/commons-style RPC framework for Scala 3, built on Made and mcodec"
 //> using publish.url https://github.com/halotukozak/mrpc
-//> using publish.license MIT
+//> using publish.license Apache-2.0
 //> using publish.vcs github:halotukozak/mrpc
 //> using publish.repository central
 //> using publish.developer "halotukozak|Bartłomiej Kozak|https://github.com/halotukozak"
