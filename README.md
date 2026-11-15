@@ -123,3 +123,7 @@ scala-cli --power fmt .
 mrpc is inspired by the [**AVSystem commons**](https://github.com/AVSystem/scala-commons) RPC framework by
 [**ghik**](https://github.com/ghik). [DIVERGENCES.md](DIVERGENCES.md) documents every point where mrpc's Scala 3
 design deliberately departs from that model.
+
+## License
+
+Apache License 2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
